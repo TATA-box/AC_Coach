@@ -1,0 +1,27 @@
+# Virtual environments
+.qtcreator/
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Zip files
+*.zip
+
+# C++ build output
+*.exe
+*.o
+*.obj
+
+# Qt Creator / IDE files
+*.user
+*.autosave
+
+# System files
+.DS_Store
+Thumbs.db
