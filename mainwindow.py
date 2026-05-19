@@ -36,6 +36,7 @@ class MainWindow(QMainWindow):
         self.ui.projectTree.doubleClicked.connect(self.openfile)
         self.ui.act_save.triggered.connect(self.savefile)
         self.ui.act_saveall.triggered.connect(self.saveall)
+        self.ui.act_new.triggered.connect(self.editor_manager.createfile)
 
         self.ui.act_compile_run.triggered.connect(self.compile_run)
 
