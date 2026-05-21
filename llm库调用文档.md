@@ -1,9 +1,13 @@
 # llm库调用文档
 
 下面按照流程来逐步说明要怎么用这个库。
+
 首先说明：请用pip install openai命令按照OpenAI SDK库。然后，在llm.py中，我是用的是我自己的DeepSeek api。**请千万不要泄露这个api，否则会带来一些麻烦**。
+
 关于deepseek api的介绍：deepseek-v4有两个模型：deepseek-v4-flash和deepseek-v4-pro。flash版本便宜、效果相对差；pro版本贵、速度相对慢、效果相对好。
+
 建议：在下文中常常有一个参数：model_name。具体传入什么model_name（到底是...-flash还是...-pro，取决于这个任务的重要程度与困难程度），我个人建议把这个留给使用者选择。默认值可以按照我留的默认参数。
+
 顺便一提：deepseek-v4-flash已经永久一折超级大降价了。deepseek-v4-pro的超级大降价持续到5.31（有可能会延期）。因此在5.31之前无需考虑API成本问题。
 
 ---
