@@ -14,6 +14,52 @@
 
 ## 第一步：用户输入题目后，解析题目
 
+解析题目一共有2步。
+
+### step 1:把题目原文切分成结构化题面
+
+```python
+from llm import structure_problem_text
+
+problem_struct = structure_problem_text(problem_text,url,api_key)
+```
+
+返回值 `problem_struct` 大致结构如下：
+
+```python
+{
+    "title": "题目标题",
+    "background": "题目背景",
+    "description": "题目描述",
+    "input_description": "输入描述",
+    "output_description": "输出描述",
+    "samples": [
+        {
+            "input": "样例输入",
+            "output": "样例输出",
+            "explanation": "样例解释"
+        }
+    ],
+    "notes": "提示、说明、数据范围等",
+    "other": "其他内容",
+    "_validate_passed": True,
+    "_validate_errors": [],
+    "_attempts": 1
+}
+```
+
+注意：这个函数的目标是切分原文，不是分析题目。所以它会尽量逐字保留原文，不做总结和改写。  
+
+前端展示时一般只展示 `title`、`background`、`description`、`input_description`、`output_description`、`samples`、`notes`、`other`。实际上大部分题目一般都不会全有。如果没有的（None），那么不展示就行了。
+
+如果 `_validate_passed` 是 `False`，说明自动切分不够可靠，可以退回展示原始题面。
+
+总的来说，这个方法就是在整理题干。然后整理好的题干展示给用户。
+
+### step 2：整理题目
+
+这一步的结果不展示给用户，可以在后台开个线程做，没必要让用户等。这一步的核心意图是，减少用户在点击“求助助教”按钮后的等待时间。（提前把题干处理好，之后求助助教时就只需要处理代码，而无需重新思考一遍题干了）
+
 用户把题目加载进系统后，先调用：
 
 ```python
@@ -58,18 +104,25 @@ analyze_problem(
 
 ---
 
-## 第二步：用户点击“求助助教”后，生成诊断和分步引导
+## 第二步：用户点击“求助助教”后，自动选择模式并生成提示
 
-说明1：为了提速，我采用的是“流式输出”。即llm库内部会实时读取从大模型服务器传来的数据，并实时解析数据并传入我封装好的一个迭代器类当中。实际上，下面的session就是一个迭代器。
+说明1：现在有 `start_auto_coach_session`（自动判断） `start_debug_guide_session`（代码已经写完了，进入debug模式）和`start_next_hint_session`（代码没写完，但写不下去了，要下一步的提示）。`start_auto_coach_session`它会先判断学生当前更需要“纠错调试”，还是“下一步提示”。
 
-说明2：下面的函数有相当多的参数。大部分可以不填。建议把其中一些内容的填写交给用户（可自行判断哪些有必要由用户填）
+- 如果代码已经基本写完，但是编译错误、运行错误、输出不对、OJ WA 等，就进入原来的 debug 模式。
+- 如果代码还没写完，或者学生只是不知道接下来怎么写，就进入 next_hint 模式，只给一个很小的下一步提示。
+- 我的建议：默认状态下用`start_auto_coach_session`。但是要给用户提供选择的余地。即用户可自行选择是哪一种。
+- 三个模式的用法几乎相同。下面仅仅以`start_auto_coach_session`为例。有区别的地方会做额外说明。
+
+说明2：为了提速，debug 模式采用“流式输出”。即llm库内部会实时读取从大模型服务器传来的数据，并实时解析数据并传入我封装好的一个迭代器类当中。实际上，下面的session就是一个迭代器。
+
+说明3：下面的函数有相当多的参数。大部分可以不填。建议把其中一些内容的填写交给用户（可自行判断哪些有必要由用户填）
 
 调用：
 
 ```python
-from llm import start_debug_guide_session
+from llm import start_auto_coach_session
 
-session = start_debug_guide_session(
+session = start_auto_coach_session(
     problem_text=problem_text,
     problem_analysis=problem_analysis,
     code=student_code,
@@ -83,7 +136,20 @@ session = start_debug_guide_session(
 )
 ```
 
-这个函数会在后台线程里生成诊断和引导步骤。
+这个函数会先判断模式，然后自动创建对应的 session。
+
+可以查看当前模式：
+
+```python
+print(session.mode)
+```
+
+`session.mode` 可能是：
+
+| 值 | 含义 |
+|---|---|
+| `debug` | 进入分步骤调试模式，即`start_debug_guide_session` |
+| `next_hint` | 进入下一步提示模式，即`start_next_hint_session` |
 
 前端点击“下一步”时：
 
@@ -97,7 +163,7 @@ else:
     print(step["guide"])
 ```
 
-`step` 的结构如下：
+`step` 的结构如下（前提是存在下一步；若不存在，返回None）：
 
 ```python
 {
@@ -112,6 +178,16 @@ else:
 }
 ```
 
+如果当前是 `next_hint` 模式（即`start_next_hint_session`，注意：**debug模式没有！**），`step` 里还有：
+
+```python
+{
+    "what_to_try_next": "学生现在应该动手做的一件小事"
+}
+```
+
+注意：`next_hint` 不是完整题解，也不是一整套提示链。它只会给当前这一小步，避免学生连续点击“下一步”直接看到完整思路。
+
 前端一般需要用到：
 
 | 字段 | 用法 |
@@ -122,10 +198,10 @@ else:
 | `student_question` | 显示为引导问题 |
 | `expected_discovery` | 可作为“查看提示/答案”内容 |
 
-### `start_debug_guide_session` 参数
+### `start_auto_coach_session` 参数
 
 ```python
-start_debug_guide_session(
+start_auto_coach_session(
     problem_text=None,
     code=None,
     program_input=None,
@@ -187,28 +263,48 @@ model_name=[
 ]
 ```
 
-要深度思考传`enabled`，不要深度思考传`disabled`
+要深度思考传`enabled`，不要深度思考传`disabled`。
+
+模型到底用deepseek-v4-pro还是deepseek-v4-flash，可自行决定。
 
 ### `session` 可用方法
 
 | 方法 | 用法 |
 |---|---|
-| `session.next_step(timeout=None)` | 获取下一个步骤。没有生成好会一直等待直到生成完成（会阻塞所在进程）；全部结束返回 `None`。 |
+| `session.next_step(timeout=None)` | 获取下一个步骤。如果是 debug 模式，就是原来的分步调试；如果是 next_hint 模式，就是一个下一步提示。timeout参数是一个时间限制。即如果多久没有输出就会报错。 |
 | `session.cached_steps()` | 获取已经生成并缓存的所有步骤。 |
-| `session.wait(timeout=None)` | 等全部生成结束，返回完整 `DebugDiagnosis` 对象。 |
+| `session.wait(timeout=None)` | 等全部生成结束。debug 模式下返回完整 `DebugDiagnosis` 对象。 |
+| `session.update_context(...)` | 学生根据提示修改代码后，更新上下文并重新判断应该继续 next_hint 还是切换到 debug。 |
 
-Qt 注意：不要在主线程里长时间阻塞调用 `next_step()` 或 `wait()`。建议放到工作线程里，再用 signal 更新 UI。
+如果当前是 `next_hint` 模式，学生没有修改代码时，再次调用 `next_step()` 可能会返回 `None`。这时应该先让学生根据提示改代码，然后调用：
+
+```python
+session.update_context(
+    code=new_code,
+    program_input=program_input,
+    program_output=program_output,
+    expected_output=expected_output,
+    error_message=error_message,
+    oj_result=oj_result,
+    extra_info=extra_info,
+)
+```
+
+Qt 注意：不要在主线程里长时间阻塞调用 `start_auto_coach_session()`、`next_step()` 或 `wait()`。这会导致卡死！
+
 
 ---
 
 ## 第三步：求助结束后，归档题目和错误原因
 
-生成全部结束后调用：
+如果这次进入的是 debug 模式，那么生成全部结束后调用：
 
 ```python
 result = session.wait()
 record = result.to_dict()
 ```
+
+如果这次只是 next_hint 模式，一般不需要立刻归档错因，因为学生还没有经历一次完整调试。可以等学生改完代码、系统切换到 debug 并完成诊断后再归档。
 
 `record` 里包含适合归档的错误信息：
 
@@ -249,6 +345,33 @@ archive_item = {
 }
 ```
 
+还想生成更适合期末复习的错因卡片，可以继续调用：
+
+```python
+from llm import summarize_error_record
+
+error_card = summarize_error_record(archive_item)
+```
+
+`error_card` 大致结构如下：
+
+```python
+{
+    "title": "错因卡片标题",
+    "error_type": "错误类型",
+    "root_cause": "根本原因",
+    "wrong_pattern": "这次错误的典型模式",
+    "knowledge_points": ["相关知识点"],
+    "review_question": "复习时可以问自己的问题",
+    "review_hint": "复习提示",
+    "avoid_next_time": "下次避免方式",
+    "tags": ["标签"],
+    "review_priority": "high"
+}
+```
+
+建议保存原始 `archive_item`，同时保存 `error_card`。前者用于回看完整调试过程，后者用于期末复习和错因统计。
+
 
 ---
 
@@ -276,6 +399,8 @@ for event in debug_guide_agent_stream(...):
 | `step` | 新生成了一个引导步骤，可以立刻展示。 |
 | `done` | 全部结束，里面包含完整诊断和所有步骤。 |
 
+这个是我早期写的，其实我认为不如直接用session调用方便。不过还是摆上来吧。
+
 ---
 
 ## 另一个可选接口：同步模式
@@ -283,7 +408,7 @@ for event in debug_guide_agent_stream(...):
 如果只是测试，不需要流式展示，可以用：
 
 ```python
-from llm_streaming_simple import debug_guide_agent
+from llm import debug_guide_agent
 
 diagnosis = debug_guide_agent(
     problem_text=problem_text,
@@ -298,7 +423,7 @@ for step in diagnosis.guide:
     print(step["title"], step["guide"])
 ```
 
-同步模式会等所有步骤全部生成完才返回，不推荐 GUI 主流程使用。这个单纯只是给测试用的。
+同步模式会等所有步骤全部生成完才返回，不推荐 GUI 主流程使用。这个单纯只是给我测试用的。实际写QT的时候没必要用这个。
 
 ---
 
@@ -306,7 +431,7 @@ for step in diagnosis.guide:
 
 ```python
 
-from llm import start_debug_guide_session
+from llm import start_auto_coach_session,structure_problem_text
 
 problem_text = """
 给定一个长度为 n 的整数序列，请求出它的最大连续子段和。
@@ -325,7 +450,10 @@ for x in a:
 print(ans)
 """
 
-session = start_debug_guide_session(
+structured=structure_problem_text(problem_text)
+print(structured)
+
+session = start_auto_coach_session(
     problem_text=problem_text,
     code=code,
     oj_result="样例通过，但提交到 OJ 后 WA",
@@ -333,6 +461,8 @@ session = start_debug_guide_session(
     auto_analyze_problem=False,
     thinking=["disabled","disabled","disabled"]
 )
+
+print("当前模式：", session.mode)
 
 while True:
     step = session.next_step()
@@ -344,9 +474,8 @@ while True:
     print(step["guide"])
     print("高亮行：", step["start_line"], step["end_line"])
 
-final_result = session.wait()
-print("错误概括：", final_result.error_summary)
-print("错误类型：", final_result.error_type)
-
-
+if session.mode == "debug":
+    final_result = session.wait()
+    print("错误概括：", final_result.error_summary)
+    print("错误类型：", final_result.error_type)
 ```
