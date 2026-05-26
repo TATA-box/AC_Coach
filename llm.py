@@ -4,14 +4,14 @@ import queue
 import threading
 from openai import OpenAI
 
-api_key = "sk-c0547d19dd04413690a8191d3ee3f2cd"
+api_key = "一个API KEY"
 url = "https://api.deepseek.com"
 
 STEP_RE = re.compile(r"<step>\s*([\s\S]*?)\s*</step>", re.I)
 
 
 def get_client(api_key=api_key, url=url):
-    return OpenAI(api_key=api_key, base_url=url)
+    return OpenAI(api_key=api_key, base_url=url,timeout=60)
 
 
 def extract_json(text):
@@ -159,6 +159,145 @@ def normalize_three(x, default):
     while len(x) < 3:
         x.append(x[-1])
     return x[:3]
+
+def _norm_problem_text(s):
+    return (s or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _collect_problem_text_fields(x, path=""):
+    items = []
+    if isinstance(x, str):
+        items.append((path, x))
+    elif isinstance(x, list):
+        for i, v in enumerate(x):
+            items += _collect_problem_text_fields(v, f"{path}[{i}]")
+    elif isinstance(x, dict):
+        for k, v in x.items():
+            if str(k).startswith("_"):
+                continue
+            items += _collect_problem_text_fields(v, f"{path}.{k}" if path else str(k))
+    return items
+
+
+def validate_structured_problem(problem_text, data):
+    raw = _norm_problem_text(problem_text)
+    errors = []
+    if not isinstance(data, dict):
+        return False, ["返回值不是 dict"]
+
+    for key in ["title", "background", "description", "input_description", "output_description", "samples", "notes", "other"]:
+        if key not in data:
+            errors.append(f"缺少字段：{key}")
+
+    for path, value in _collect_problem_text_fields(data):
+        v = _norm_problem_text(value)
+        if not v.strip():
+            continue
+        if v not in raw:
+            errors.append(f"{path} 不是题目原文中的原样片段")
+
+    if not isinstance(data.get("samples", []), list):
+        errors.append("samples 不是 list")
+    else:
+        for i, s in enumerate(data.get("samples", [])):
+            if not isinstance(s, dict):
+                errors.append(f"samples[{i}] 不是 dict")
+                continue
+            for key in ["input", "output", "explanation"]:
+                if key not in s:
+                    errors.append(f"samples[{i}] 缺少字段：{key}")
+
+    return len(errors) == 0, errors
+
+
+def structure_problem_text(problem_text, api_key=api_key, url=url, model_name="deepseek-v4-flash", thinking="disabled", max_retries=3):
+    system = """
+你是程序设计题目的题面切分助手。
+任务：把用户提供的算法题题面切分成结构化 JSON。
+非常重要：
+1. 所有展示给用户的字段，必须逐字复制题目原文中的内容。
+2. 不能改写，不能总结，不能润色，不能补充。
+3. 如果某一部分原文不存在，就填空字符串 "" 或空列表 []。
+4. 样例输入和样例输出也必须逐字复制原文，不要改空格，不要改换行，不要加 Markdown。
+5. 如果题目没有背景故事，background 填 ""。
+6. notes 用来放提示、说明、数据范围等没有归入前面字段的原文内容。
+7. other 用来放仍然无法归类但需要保留的原文片段。
+严格返回 JSON：
+{
+  "title": "题目标题，若没有则为空字符串",
+  "background": "题目背景故事，若没有则为空字符串",
+  "description": "题目描述",
+  "input_description": "输入描述",
+  "output_description": "输出描述",
+  "samples": [
+    {
+      "input": "样例输入",
+      "output": "样例输出",
+      "explanation": "样例解释，若没有则为空字符串"
+    }
+  ],
+  "notes": "提示、说明、数据范围等",
+  "other": "其他需要保留的原文"
+}
+"""
+    feedback = ""
+    last_data = None
+    last_errors = []
+
+    for i in range(max_retries):
+        user = f"""
+请切分下面这道题目。注意：所有字段必须逐字复制原文，不允许改写。
+
+{feedback}
+
+【题目原文】
+{problem_text}
+"""
+        try:
+            data = call_json(system, user, model_name=model_name, max_tokens=4096,thinking=thinking, api_key=api_key, url=url)
+        except Exception as e:
+            last_errors = [str(e)]
+            continue
+
+        for key in ["title", "background", "description", "input_description", "output_description", "notes", "other"]:
+            data.setdefault(key, "")
+        data.setdefault("samples", [])
+
+        ok, errors = validate_structured_problem(problem_text, data)
+        last_data = data
+        last_errors = errors
+
+        if ok:
+            data["_validate_passed"] = True
+            data["_validate_errors"] = []
+            data["_attempts"] = i + 1
+            return data
+
+        feedback = f"""
+上一次切分没有通过校验，请根据下面的问题重新切分。
+校验失败原因：
+{json.dumps(errors, ensure_ascii=False)}
+
+要求：失败字段必须改成题目原文中可以直接找到的原样片段。不能概括，不能改字，不能自己补。
+"""
+
+    if last_data is None:
+        last_data = {
+            "title": "",
+            "background": "",
+            "description": problem_text,
+            "input_description": "",
+            "output_description": "",
+            "samples": [],
+            "notes": "",
+            "other": ""
+        }
+
+    last_data["_validate_passed"] = False
+    last_data["_validate_errors"] = last_errors
+    last_data["_attempts"] = max_retries
+    return last_data
+
 
 
 def analyze_problem(problem_text, api_key=api_key, url=url, model_name="deepseek-v4-flash"):
@@ -431,6 +570,281 @@ class DebugGuideSession:
 def start_debug_guide_session(**kwargs):
     return DebugGuideSession(**kwargs)
 
+def prepare_hint_context(problem_text=None, code=None, program_input=None, program_output=None,expected_output=None, error_message=None, oj_result=None, test_cases=None,extra_info=None, problem_analysis=None, auto_analyze_problem=True,api_key=api_key, url=url, problem_model_name="deepseek-v4-flash"):
+    if not problem_analysis and auto_analyze_problem and problem_text:
+        try:
+            problem_analysis = analyze_problem(problem_text, api_key, url, problem_model_name)
+        except Exception:
+            problem_analysis = {}
+    return build_context(problem_text, code, program_input, program_output,expected_output, error_message, oj_result,test_cases, extra_info, problem_analysis)
+
+
+def analyze_student_need(context, api_key=api_key, url=url, model_name="deepseek-v4-flash", thinking="disabled"):
+    system = """
+你是“程序设计实习”课程助教系统的路由判断器。
+任务：判断学生现在更需要“纠错调试”还是“下一步提示”。
+判断标准：
+1. 如果代码基本已经写成，有明确报错、输出不对、OJ WA/RE/TLE/CE，优先选择 debug。
+2. 如果代码为空、只有框架、明显没写完、存在 TODO/pass/未实现函数，或学生描述自己不知道接下来怎么写，优先选择 next_hint。
+3. 如果代码虽然不完整但已经有具体错误信息，也要判断这个错误是不是因为“还没写完”。没写完则 next_hint，写完后出错则 debug。
+4. 不要评价学生水平，不要给解法。
+严格返回 JSON：
+{
+  "code_state": "empty/incomplete/mostly_complete/complete/uncertain",
+  "need_type": "debug/next_hint/uncertain",
+  "reason": "判断理由",
+  "missing_parts": ["如果没写完，缺什么"],
+  "debug_evidence": ["如果适合纠错，有哪些证据"],
+  "confidence": "low/medium/high"
+}
+"""
+    user = f"""
+请判断下面这次求助应该进入哪种模式。
+
+【题目原文】
+{context['problem_text']}
+
+【题目分析】
+{json.dumps(context['problem_analysis'], ensure_ascii=False)}
+
+【带行号的代码】
+{context['code_with_line_numbers']}
+
+【程序输入】
+{context['program_input']}
+
+【程序实际输出】
+{context['program_output']}
+
+【期望输出】
+{context['expected_output']}
+
+【报错信息】
+{context['error_message']}
+
+【OJ 结果】
+{context['oj_result']}
+
+【测试样例】
+{json.dumps(context['test_cases'], ensure_ascii=False)}
+
+【补充信息】
+{context['extra_info']}
+"""
+    data = call_json(system, user, model_name=model_name, max_tokens=1024,thinking=thinking, api_key=api_key, url=url)
+    if data.get("need_type") not in ("debug", "next_hint", "uncertain"):
+        data["need_type"] = "uncertain"
+    return data
+
+
+def generate_next_hint_step(context, need_analysis=None, hint_history=None, api_key=api_key, url=url, model_name="deepseek-v4-flash", thinking="disabled"):
+    system = """
+你是“程序设计实习”课程助教，学生现在还没有到适合纠错的阶段，需要一个“下一步提示”。
+你只能给一个很小的下一步提示，不能给完整解题路线，不能给一串阶梯提示，不能直接通向最终答案。
+提示应该让学生接下来只做一件事，例如：补完一个函数、确认一个变量含义、画一个状态变化表、检查一条输入输出规则、先实现一个最小版本。
+不要写完整代码，不要写伪代码模板，不要列出完整算法步骤，不要提前透露后续所有思路。
+严格返回 JSON：
+{
+  "step_no": 1,
+  "title": "短标题",
+  "focus": "这一步只关注什么",
+  "start_line": null,
+  "end_line": null,
+  "guide": "展示给学生看的下一步提示",
+  "student_question": "问学生的一个问题",
+  "expected_discovery": "学生完成这一步后应该发现什么",
+  "what_to_try_next": "学生现在应该动手做的一件小事"
+}
+"""
+    user = f"""
+请只生成一个下一步提示。
+
+【路由判断】
+{json.dumps(need_analysis or {}, ensure_ascii=False)}
+
+【已经给过的提示】
+{json.dumps(hint_history or [], ensure_ascii=False)}
+
+【题目原文】
+{context['problem_text']}
+
+【题目分析】
+{json.dumps(context['problem_analysis'], ensure_ascii=False)}
+
+【带行号的代码】
+{context['code_with_line_numbers']}
+
+【程序输入】
+{context['program_input']}
+
+【程序实际输出】
+{context['program_output']}
+
+【期望输出】
+{context['expected_output']}
+
+【报错信息】
+{context['error_message']}
+
+【OJ 结果】
+{context['oj_result']}
+
+【测试样例】
+{json.dumps(context['test_cases'], ensure_ascii=False)}
+
+【补充信息】
+{context['extra_info']}
+"""
+    step = call_json(system, user, model_name=model_name, max_tokens=1024,thinking=thinking, api_key=api_key, url=url)
+    step = normalize_step(step, len(hint_history or []) + 1)
+    step.setdefault("what_to_try_next", "")
+    return step
+
+
+def summarize_error_record(archive_item, api_key=api_key, url=url, model_name="deepseek-v4-flash", thinking="disabled"):
+    system = """
+你是“程序设计实习”课程的错因整理助教。
+任务：把一次调试记录整理成适合放入个人错因库的卡片。
+不要给完整正确代码，不要扩展成新的题解。
+严格返回 JSON：
+{
+  "title": "错因卡片标题",
+  "error_type": "错误类型",
+  "root_cause": "根本原因",
+  "wrong_pattern": "学生这次错误的典型模式",
+  "knowledge_points": ["相关知识点"],
+  "review_question": "复习时可以问自己的问题",
+  "review_hint": "复习提示，不直接给答案",
+  "avoid_next_time": "下次避免方式",
+  "tags": ["标签"],
+  "review_priority": "low/medium/high"
+}
+"""
+    user = f"请整理下面这条调试归档记录：\n\n{json.dumps(archive_item, ensure_ascii=False)}"
+    return call_json(system, user, model_name=model_name, max_tokens=1536,thinking=thinking, api_key=api_key, url=url)
+
+
+class NextHintSession:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.hints = []
+        self.waiting_for_update = False
+        self.context = prepare_hint_context(
+            kwargs.get("problem_text"), kwargs.get("code"), kwargs.get("program_input"),
+            kwargs.get("program_output"), kwargs.get("expected_output"), kwargs.get("error_message"),
+            kwargs.get("oj_result"), kwargs.get("test_cases"), kwargs.get("extra_info"),
+            kwargs.get("problem_analysis"), kwargs.get("auto_analyze_problem", True),
+            kwargs.get("api_key", api_key), kwargs.get("url", url), kwargs.get("problem_model_name", "deepseek-v4-flash")
+        )
+        self.need_analysis = kwargs.get("need_analysis")
+        if self.need_analysis is None:
+            self.need_analysis = analyze_student_need(
+                self.context, kwargs.get("api_key", api_key), kwargs.get("url", url),
+                kwargs.get("route_model_name", "deepseek-v4-flash"), kwargs.get("thinking", "disabled")
+            )
+
+    def next_step(self, timeout=None):
+        if self.waiting_for_update:
+            return None
+        step = generate_next_hint_step(
+            self.context, self.need_analysis, self.hints,
+            self.kwargs.get("api_key", api_key), self.kwargs.get("url", url),
+            self.kwargs.get("hint_model_name", "deepseek-v4-flash"), self.kwargs.get("thinking", "disabled")
+        )
+        self.hints.append(step)
+        self.waiting_for_update = True
+        return step
+
+    def update_context(self, **kwargs):
+        self.kwargs.update(kwargs)
+        self.waiting_for_update = False
+        self.context = prepare_hint_context(
+            self.kwargs.get("problem_text"), self.kwargs.get("code"), self.kwargs.get("program_input"),
+            self.kwargs.get("program_output"), self.kwargs.get("expected_output"), self.kwargs.get("error_message"),
+            self.kwargs.get("oj_result"), self.kwargs.get("test_cases"), self.kwargs.get("extra_info"),
+            self.kwargs.get("problem_analysis"), self.kwargs.get("auto_analyze_problem", True),
+            self.kwargs.get("api_key", api_key), self.kwargs.get("url", url), self.kwargs.get("problem_model_name", "deepseek-v4-flash")
+        )
+        self.need_analysis = analyze_student_need(
+            self.context, self.kwargs.get("api_key", api_key), self.kwargs.get("url", url),
+            self.kwargs.get("route_model_name", "deepseek-v4-flash"), self.kwargs.get("thinking", "disabled")
+        )
+
+    def cached_steps(self):
+        return self.hints[:]
+
+    def wait(self, timeout=None):
+        return {"need_analysis": self.need_analysis, "hint_steps": self.hints[:]}
+
+
+def start_next_hint_session(**kwargs):
+    return NextHintSession(**kwargs)
+
+
+def start_ladder_hint_session(**kwargs):
+    return start_next_hint_session(**kwargs)
+
+
+class AutoCoachSession:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.mode = None
+        self.need_analysis = None
+        self.session = None
+        self.route()
+
+    def base_kwargs(self):
+        names = [
+            "problem_text", "code", "program_input", "program_output", "expected_output",
+            "error_message", "oj_result", "test_cases", "extra_info", "problem_analysis",
+            "auto_analyze_problem", "api_key", "url", "model_name", "thinking",
+            "problem_model_name", "max_guide_steps"
+        ]
+        return {name: self.kwargs.get(name) for name in names if name in self.kwargs}
+
+    def route(self):
+        base = self.base_kwargs()
+        context = prepare_hint_context(
+            base.get("problem_text"), base.get("code"), base.get("program_input"),
+            base.get("program_output"), base.get("expected_output"), base.get("error_message"),
+            base.get("oj_result"), base.get("test_cases"), base.get("extra_info"),
+            base.get("problem_analysis"), base.get("auto_analyze_problem", True),
+            base.get("api_key", api_key), base.get("url", url), base.get("problem_model_name", "deepseek-v4-flash")
+        )
+        self.need_analysis = analyze_student_need(
+            context, base.get("api_key", api_key), base.get("url", url),
+            self.kwargs.get("route_model_name", "deepseek-v4-flash"), self.kwargs.get("route_thinking", "disabled")
+        )
+        self.mode = self.need_analysis.get("need_type", "uncertain")
+        if self.mode == "debug":
+            base["problem_analysis"] = context.get("problem_analysis", {})
+            base["auto_analyze_problem"] = False
+            self.session = start_debug_guide_session(**base)
+        else:
+            base["problem_analysis"] = context.get("problem_analysis", {})
+            base["auto_analyze_problem"] = False
+            base["need_analysis"] = self.need_analysis
+            base["route_model_name"] = self.kwargs.get("route_model_name", "deepseek-v4-flash")
+            base["hint_model_name"] = self.kwargs.get("hint_model_name", "deepseek-v4-flash")
+            self.session = start_next_hint_session(**base)
+            self.mode = "next_hint"
+
+    def next_step(self, timeout=None):
+        return self.session.next_step(timeout)
+
+    def cached_steps(self):
+        return self.session.cached_steps()
+
+    def wait(self, timeout=None):
+        return self.session.wait(timeout)
+
+    def update_context(self, **kwargs):
+        self.kwargs.update(kwargs)
+        self.route()
+
+
+def start_auto_coach_session(**kwargs):
+    return AutoCoachSession(**kwargs)
 
 if __name__ == "__main__":
     problem_text = """
