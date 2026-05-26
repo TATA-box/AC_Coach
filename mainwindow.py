@@ -4,11 +4,12 @@ from ui.ui_form import Ui_MainWindow
 from app.editor_manager import EditorManager
 from app.cpp_runner import CppRunner
 from app.panel_manager import PanelManager
-
+from database import Database
 
 class MainWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.db = Database()
         self.ui=Ui_MainWindow()
         self.ui.setupUi(self)
         self.ui.mainstackedWidget.setCurrentWidget(self.ui.codingPage)

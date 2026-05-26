@@ -3,12 +3,14 @@ name = "AC_Coach"
 
 [tool.pyside6-project]
 files = [
+    "app/coach_service.py",
+    "app/cpp_runner.py",
+    "app/editor_manager.py",
+    "app/file_manager.py",
+    "app/panel_manager.py",
+    "database.py",
+    "llm_integration.py",
     "main.py",
     "mainwindow.py",
     "ui/form.ui",
-    "app/editor_manager.py",
-    "app/file_manager.py",
-    "app/cpp_runner.py",
-    "app/coach_service.py",
-    "app/panel_manager.py"
 ]
