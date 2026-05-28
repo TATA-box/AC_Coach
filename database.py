@@ -27,6 +27,15 @@ class Database:
                 common_pitfalls TEXT,
                 suggested_approach TEXT,
                 difficulty TEXT,
+                structured_title TEXT,
+                structured_background TEXT,
+                structured_description TEXT,
+                structured_input_desc TEXT,
+                structured_output_desc TEXT,
+                structured_samples TEXT,
+                structured_notes TEXT,
+                structured_other TEXT,
+                structured_validate_passed BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -95,6 +104,14 @@ class Database:
                     knowledge_points TEXT,
                     correct_suggestion TEXT,
                     is_mastered BOOLEAN DEFAULT 0,
+                    error_card_title TEXT,
+                    root_cause TEXT,
+                    wrong_pattern TEXT,
+                    review_question TEXT,
+                    review_hint TEXT,
+                    avoid_next_time TEXT,
+                    tags TEXT,
+                    review_priority TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE,
                     FOREIGN KEY (diagnosis_id) REFERENCES diagnoses(id) ON DELETE CASCADE
@@ -107,16 +124,25 @@ class Database:
         #print("数据库表创建完成")
 
     def add_problem(self, title, content="", summary="", input_format="", output_format="",
-                        knowledge_points="", constraints="", common_pitfalls="", suggested_approach="", difficulty=""):
+                        knowledge_points="", constraints="", common_pitfalls="", suggested_approach="", difficulty="",
+                        structured_title="", structured_background="", structured_description="",
+                        structured_input_desc="", structured_output_desc="", structured_samples="",
+                        structured_notes="", structured_other="", structured_validate_passed=0):
         conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute('''
             INSERT INTO problems(title, content, summary, input_format, output_format,
-                                knowledge_points, constraints, common_pitfalls, suggested_approach, difficulty)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
+                                knowledge_points, constraints, common_pitfalls, suggested_approach, difficulty,
+                                structured_title, structured_background, structured_description,
+                                structured_input_desc, structured_output_desc, structured_samples,
+                                structured_notes, structured_other, structured_validate_passed)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ''', (title, content, summary, input_format, output_format,
-                knowledge_points, constraints, common_pitfalls, suggested_approach, difficulty))
+                knowledge_points, constraints, common_pitfalls, suggested_approach, difficulty,
+                structured_title, structured_background, structured_description,
+                structured_input_desc, structured_output_desc, structured_samples,
+                structured_notes, structured_other, structured_validate_passed))
 
         conn.commit()
         problem_id = cursor.lastrowid
@@ -143,7 +169,7 @@ class Database:
         conn.close()
 
         if row:
-            return {"id":row[0], "title":row[1], "content":row[2], "created_at":row[3]}
+            return dict(row)
         return None
 
     def add_code_record(self, problem_id, code_content, language="cpp"):
@@ -215,19 +241,54 @@ class Database:
 
         return [dict(row) for row in rows]
 
+    def update_diagnosis(self, diagnosis_id, has_error="", error_summary="", error_type="",
+                     knowledge_points="", suspected_locations="", confidence="",
+                     reason_for_uncertainty="", debug_suggestion="", guide_steps=""):
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            UPDATE diagnoses SET
+                has_error = ?,
+                error_summary = ?,
+                error_type = ?,
+                knowledge_points = ?,
+                suspected_locations = ?,
+                confidence = ?,
+                reason_for_uncertainty = ?,
+                debug_suggestion = ?,
+                guide_steps = ?
+            WHERE id = ?
+        ''', (has_error, error_summary, error_type, knowledge_points,
+                suspected_locations, confidence, reason_for_uncertainty,
+                debug_suggestion, guide_steps, diagnosis_id))
+
+        conn.commit()
+        conn.close()
+        print(f"诊断记录已更新，id:{diagnosis_id}")
+
     def add_mistake(self, problem_id, diagnosis_id, error_type, error_description="", wrong_code="",
                         wrong_code_start_line=None, wrong_code_end_line=None,
-                        knowledge_points="", correct_suggestion=""):
+                        knowledge_points="", correct_suggestion="",
+                        error_card_title="", root_cause="", wrong_pattern="",
+                        review_question="", review_hint="", avoid_next_time="",
+                        tags="", review_priority=""):
         conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute('''
             INSERT INTO mistake_library (
                 problem_id, diagnosis_id, error_type, error_description, wrong_code,
-                wrong_code_start_line, wrong_code_end_line, knowledge_points, correct_suggestion
-            ) VALUES (?,?,?,?,?,?,?,?,?)
+                wrong_code_start_line, wrong_code_end_line, knowledge_points, correct_suggestion,
+                error_card_title, root_cause, wrong_pattern,
+                review_question, review_hint, avoid_next_time,
+                tags, review_priority
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ''', (problem_id, diagnosis_id, error_type, error_description, wrong_code,
-                wrong_code_start_line, wrong_code_end_line, knowledge_points, correct_suggestion))
+                wrong_code_start_line, wrong_code_end_line, knowledge_points, correct_suggestion,
+                error_card_title, root_cause, wrong_pattern,
+                review_question, review_hint, avoid_next_time,
+                tags, review_priority))
 
         conn.commit()
         mistake_id = cursor.lastrowid
