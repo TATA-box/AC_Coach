@@ -101,6 +101,9 @@ class CppRunner(QObject):
             self.output.emit("Compile failed.")
 
     def compile_error(self,error):
+        if self.process:
+            error_str = self.process.errorString()
+            self.output.emit(f"❌ 编译器启动失败详情：{error_str}")
         self.output.emit("Failed to start compiler.")
         if self.process is not None:
             self.process.deleteLater()
