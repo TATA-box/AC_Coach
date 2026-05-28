@@ -4,7 +4,7 @@ import queue
 import threading
 from openai import OpenAI
 
-api_key = "sk-c0547d19dd04413690a8191d3ee3f2cd"
+api_key = "API_KEY"
 url = "https://api.deepseek.com"
 
 STEP_RE = re.compile(r"<step>\s*([\s\S]*?)\s*</step>", re.I)
