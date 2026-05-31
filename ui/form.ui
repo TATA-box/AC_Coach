@@ -467,7 +467,7 @@
      <x>0</x>
      <y>0</y>
      <width>800</width>
-     <height>22</height>
+     <height>21</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">
@@ -507,9 +507,24 @@
     </property>
     <addaction name="act_about"/>
    </widget>
+   <widget class="QMenu" name="menuCoach">
+    <property name="title">
+     <string>Coach</string>
+    </property>
+    <addaction name="act_analyse"/>
+   </widget>
+   <widget class="QMenu" name="menuQuestion">
+    <property name="title">
+     <string>Question</string>
+    </property>
+    <addaction name="act_modify"/>
+    <addaction name="act_check"/>
+   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuEditor"/>
    <addaction name="menuRun"/>
+   <addaction name="menuQuestion"/>
+   <addaction name="menuCoach"/>
    <addaction name="menuHelp"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
@@ -644,6 +659,36 @@
    </property>
    <property name="menuRole">
     <enum>QAction::MenuRole::TextHeuristicRole</enum>
+   </property>
+  </action>
+  <action name="actionCreat_File">
+   <property name="text">
+    <string>Creat File</string>
+   </property>
+  </action>
+  <action name="actionModify">
+   <property name="text">
+    <string>Modify</string>
+   </property>
+  </action>
+  <action name="actionCheck">
+   <property name="text">
+    <string>Check</string>
+   </property>
+  </action>
+  <action name="act_analyse">
+   <property name="text">
+    <string>analyse</string>
+   </property>
+  </action>
+  <action name="act_modify">
+   <property name="text">
+    <string>Modify</string>
+   </property>
+  </action>
+  <action name="act_check">
+   <property name="text">
+    <string>Check</string>
    </property>
   </action>
  </widget>

@@ -1,8 +1,14 @@
 import sqlite3
+import json
+import hashlib
+
+from pathlib import Path
 
 class Database:
-    def __init__(self, db_path="accoach.db"):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        if db_path is None:
+            db_path = Path(__file__).resolve().parent / "accoach.db"
+        self.db_path = str(Path(db_path).resolve())
         self._init_database()
 
     def _get_connection(self):
@@ -36,6 +42,8 @@ class Database:
                 structured_notes TEXT,
                 structured_other TEXT,
                 structured_validate_passed BOOLEAN DEFAULT 0,
+                analysis_status TEXT DEFAULT "done",
+                analysis_error TEXT DEFAULT "",
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -90,6 +98,16 @@ class Database:
                 FOREIGN KEY (diagnosis_id) REFERENCES diagnoses(id) ON DELETE CASCADE
             )
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS problem_files(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_path TEXT NOT NULL UNIQUE,
+                problem_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+            )
+        ''')
 
         cursor.execute('''
                 CREATE TABLE IF NOT EXISTS mistake_library(
@@ -117,8 +135,7 @@ class Database:
                     FOREIGN KEY (diagnosis_id) REFERENCES diagnoses(id) ON DELETE CASCADE
             )
         ''')
-
-
+        self._ensure_problem_analysis_columns(cursor)
         conn.commit()
         conn.close()
         #print("数据库表创建完成")
@@ -363,3 +380,108 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def update_problem(self, problem_id, title, content="", summary="", input_format="", output_format="",
+                        knowledge_points="", constraints="", common_pitfalls="", suggested_approach="", difficulty="",
+                        structured_title="", structured_background="", structured_description="",
+                        structured_input_desc="", structured_output_desc="", structured_samples="",
+                        structured_notes="", structured_other="", structured_validate_passed=0):
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            UPDATE problems SET
+                title = ?,
+                content = ?,
+                summary = ?,
+                input_format = ?,
+                output_format = ?,
+                knowledge_points = ?,
+                constraints = ?,
+                common_pitfalls = ?,
+                suggested_approach = ?,
+                difficulty = ?,
+                structured_title = ?,
+                structured_background = ?,
+                structured_description = ?,
+                structured_input_desc = ?,
+                structured_output_desc = ?,
+                structured_samples = ?,
+                structured_notes = ?,
+                structured_other = ?,
+                structured_validate_passed = ?
+            WHERE id = ?
+        ''', (title, content, summary, input_format, output_format,
+                knowledge_points, constraints, common_pitfalls, suggested_approach, difficulty,
+                structured_title, structured_background, structured_description,
+                structured_input_desc, structured_output_desc, structured_samples,
+                structured_notes, structured_other, structured_validate_passed, problem_id))
+
+        conn.commit()
+        conn.close()
+
+    def bind_problem_file(self, file_path, problem_id):
+        file_path = str(Path(file_path).resolve())
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT INTO problem_files(file_path, problem_id)
+            VALUES (?, ?)
+            ON CONFLICT(file_path) DO UPDATE SET
+                problem_id = excluded.problem_id,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (file_path, problem_id))
+
+        conn.commit()
+        conn.close()
+
+    def get_problem_by_file(self, file_path):
+        file_path = str(Path(file_path).resolve())
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT p.*
+            FROM problem_files pf
+            JOIN problems p ON p.id = pf.problem_id
+            WHERE pf.file_path = ?
+        ''', (file_path,))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return dict(row)
+        return None
+
+    def _ensure_problem_analysis_columns(self, cursor):
+        cursor.execute("PRAGMA table_info(problems)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if "analysis_status" not in columns:
+            cursor.execute(
+                'ALTER TABLE problems ADD COLUMN analysis_status TEXT DEFAULT "done"'
+            )
+
+        if "analysis_error" not in columns:
+            cursor.execute(
+                'ALTER TABLE problems ADD COLUMN analysis_error TEXT DEFAULT ""'
+            )
+
+    def set_problem_analysis_status(self, problem_id, status, error=""):
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            '''
+            UPDATE problems
+            SET analysis_status = ?,
+                analysis_error = ?
+            WHERE id = ?
+            ''',
+            (status, error, problem_id)
+        )
+
+        conn.commit()
+        conn.close()
