@@ -136,6 +136,7 @@ class Database:
             )
         ''')
         self._ensure_problem_analysis_columns(cursor)
+        self._ensure_coach_columns(cursor)
         conn.commit()
         conn.close()
         #print("数据库表创建完成")
@@ -189,20 +190,59 @@ class Database:
             return dict(row)
         return None
 
-    def add_code_record(self, problem_id, code_content, language="cpp"):
+    def add_code_record(
+            self,
+            problem_id,
+            code_content,
+            language="cpp",
+            program_input="",
+            program_output="",
+            expected_output="",
+            error_message="",
+            oj_result="",
+            extra_info="",
+            run_success=None,
+    ):
         conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
-            "INSERT INTO code_records (problem_id, code_content, language) VALUES (?,?,?)",
-            (problem_id, code_content, language)
+            '''
+            INSERT INTO code_records (
+                problem_id,
+                code_content,
+                language,
+                run_output,
+                run_success,
+                program_input,
+                program_output,
+                expected_output,
+                error_message,
+                oj_result,
+                extra_info
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                problem_id,
+                code_content,
+                language,
+                program_output or "",
+                None if run_success is None else 1 if run_success else 0,
+                program_input or "",
+                program_output or "",
+                expected_output or "",
+                error_message or "",
+                oj_result or "",
+                extra_info or "",
+            ),
         )
 
         conn.commit()
         record_id = cursor.lastrowid
         conn.close()
 
-        print(f"代码记录已添加，id:{record_id}")
+        #print(f"代码记录已添加，id:{record_id}")
         return record_id
 
     def update_code_result(self, record_id, output, success):
@@ -210,36 +250,208 @@ class Database:
         cursor = conn.cursor()
 
         cursor.execute(
-            "UPDATE code_records SET run_output = ?, run_success = ? WHERE id = ?",
-            (output, success, record_id)
+            '''
+            UPDATE code_records
+            SET run_output = ?,
+                program_output = ?,
+                run_success = ?
+            WHERE id = ?
+            ''',
+            (output or "", output or "", 1 if success else 0, record_id),
         )
 
         conn.commit()
         conn.close()
-        print(f"代码记录已更新，id:{record_id}")
+        #print(f"代码记录已更新，id:{record_id}")
 
-    def add_diagnosis(self, code_record_id, problem_id, has_error="", error_summary="", error_type="",
-                        knowledge_points="", suspected_locations="", confidence="",
-                        reason_for_uncertainty="", debug_suggestion="", guide_steps="", raw_response=""):
+    def update_code_context(
+            self,
+            record_id,
+            code_content=None,
+            program_input="",
+            program_output="",
+            expected_output="",
+            error_message="",
+            oj_result="",
+            extra_info="",
+            run_success=None,
+    ):
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
+        cursor.execute(
+            '''
+            UPDATE code_records
+            SET code_content = COALESCE(?, code_content),
+                program_input = ?,
+                program_output = ?,
+                expected_output = ?,
+                error_message = ?,
+                oj_result = ?,
+                extra_info = ?,
+                run_output = ?,
+                run_success = COALESCE(?, run_success)
+            WHERE id = ?
+            ''',
+            (
+                code_content,
+                program_input or "",
+                program_output or "",
+                expected_output or "",
+                error_message or "",
+                oj_result or "",
+                extra_info or "",
+                program_output or "",
+                None if run_success is None else 1 if run_success else 0,
+                record_id,
+            ),
+        )
+
+        conn.commit()
+        conn.close()
+
+    def get_latest_code_record_by_problem(self, problem_id):
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            '''
+            SELECT *
+            FROM code_records
+            WHERE problem_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            ''',
+            (problem_id,),
+        )
+
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def ensure_code_record(
+            self,
+            problem_id,
+            code_content,
+            language="cpp",
+            program_input="",
+            program_output="",
+            expected_output="",
+            error_message="",
+            oj_result="",
+            extra_info="",
+            run_success=None,
+    ):
+        latest = self.get_latest_code_record_by_problem(problem_id)
+
+        if latest and latest.get("code_content") == code_content:
+            self.update_code_context(
+                record_id=latest["id"],
+                code_content=code_content,
+                program_input=program_input,
+                program_output=program_output,
+                expected_output=expected_output,
+                error_message=error_message,
+                oj_result=oj_result,
+                extra_info=extra_info,
+                run_success=run_success,
+            )
+            return latest["id"]
+
+        return self.add_code_record(
+            problem_id=problem_id,
+            code_content=code_content,
+            language=language,
+            program_input=program_input,
+            program_output=program_output,
+            expected_output=expected_output,
+            error_message=error_message,
+            oj_result=oj_result,
+            extra_info=extra_info,
+            run_success=run_success,
+        )
+
+    def add_diagnosis(
+            self,
+            code_record_id,
+            problem_id,
+            has_error="",
+            error_summary="",
+            error_type="",
+            knowledge_points="",
+            suspected_locations="",
+            confidence="",
+            reason_for_uncertainty="",
+            debug_suggestion="",
+            guide_steps="",
+            raw_response="",
+            mode="",
+            status="",
+    ):
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            '''
             INSERT INTO diagnoses (
-                code_record_id, problem_id, has_error, error_summary, error_type,
-                knowledge_points, suspected_locations, confidence, reason_for_uncertainty,
-                debug_suggestion, guide_steps, raw_response
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        ''', (code_record_id, problem_id, has_error, error_summary, error_type,
-                knowledge_points, suspected_locations, confidence, reason_for_uncertainty,
-                debug_suggestion, guide_steps, raw_response))
+                code_record_id,
+                problem_id,
+                has_error,
+                error_summary,
+                error_type,
+                knowledge_points,
+                suspected_locations,
+                confidence,
+                reason_for_uncertainty,
+                debug_suggestion,
+                guide_steps,
+                raw_response,
+                mode,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                code_record_id,
+                problem_id,
+                has_error,
+                error_summary,
+                error_type,
+                knowledge_points,
+                suspected_locations,
+                confidence,
+                reason_for_uncertainty,
+                debug_suggestion,
+                guide_steps,
+                raw_response,
+                mode,
+                status,
+            ),
+        )
 
         conn.commit()
         diagnosis_id = cursor.lastrowid
         conn.close()
 
-        print(f"诊断记录已添加，id:{diagnosis_id}")
+        #print(f"诊断记录已添加，id:{diagnosis_id}")
         return diagnosis_id
+
+    def set_diagnosis_mode_status(self, diagnosis_id, mode="", status=""):
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            '''
+            UPDATE diagnoses
+            SET mode = ?,
+                status = ?
+            WHERE id = ?
+            ''',
+            (mode or "", status or "", diagnosis_id),
+        )
+
+        conn.commit()
+        conn.close()
 
     def get_diagnoses_by_problem(self, problem_id):
         conn = self._get_connection()
@@ -258,13 +470,26 @@ class Database:
 
         return [dict(row) for row in rows]
 
-    def update_diagnosis(self, diagnosis_id, has_error="", error_summary="", error_type="",
-                     knowledge_points="", suspected_locations="", confidence="",
-                     reason_for_uncertainty="", debug_suggestion="", guide_steps=""):
+    def update_diagnosis(
+            self,
+            diagnosis_id,
+            has_error="",
+            error_summary="",
+            error_type="",
+            knowledge_points="",
+            suspected_locations="",
+            confidence="",
+            reason_for_uncertainty="",
+            debug_suggestion="",
+            guide_steps="",
+            raw_response=None,
+            status=None,
+    ):
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
+        cursor.execute(
+            '''
             UPDATE diagnoses SET
                 has_error = ?,
                 error_summary = ?,
@@ -274,15 +499,30 @@ class Database:
                 confidence = ?,
                 reason_for_uncertainty = ?,
                 debug_suggestion = ?,
-                guide_steps = ?
+                guide_steps = ?,
+                raw_response = COALESCE(?, raw_response),
+                status = COALESCE(?, status)
             WHERE id = ?
-        ''', (has_error, error_summary, error_type, knowledge_points,
-                suspected_locations, confidence, reason_for_uncertainty,
-                debug_suggestion, guide_steps, diagnosis_id))
+            ''',
+            (
+                has_error,
+                error_summary,
+                error_type,
+                knowledge_points,
+                suspected_locations,
+                confidence,
+                reason_for_uncertainty,
+                debug_suggestion,
+                guide_steps,
+                raw_response,
+                status,
+                diagnosis_id,
+            ),
+        )
 
         conn.commit()
         conn.close()
-        print(f"诊断记录已更新，id:{diagnosis_id}")
+        #print(f"诊断记录已更新，id:{diagnosis_id}")
 
     def add_mistake(self, problem_id, diagnosis_id, error_type, error_description="", wrong_code="",
                         wrong_code_start_line=None, wrong_code_end_line=None,
@@ -311,7 +551,7 @@ class Database:
         mistake_id = cursor.lastrowid
         conn.close()
 
-        print(f"错因已记录，id:{mistake_id}")
+        #print(f"错因已记录，id:{mistake_id}")
         return mistake_id
 
     def get_all_mistakes(self, include_mastered=True):
@@ -351,18 +591,53 @@ class Database:
         conn.commit()
         conn.close()
 
-        print(f"错因{mistake_id}已标记为{'已掌握' if mastered else '未掌握'}")
+        #print(f"错因{mistake_id}已标记为{'已掌握' if mastered else '未掌握'}")
 
-    def add_guide_step(self, diagnosis_id, step_no, title, guide, start_line=None, end_line=None,
-                        student_question="", expected_discovery="", focus=""):
+    def add_guide_step(
+            self,
+            diagnosis_id,
+            step_no,
+            title,
+            guide,
+            start_line=None,
+            end_line=None,
+            student_question="",
+            expected_discovery="",
+            focus="",
+            what_to_try_next="",
+    ):
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute('''
-            INSERT INTO guide_steps (diagnosis_id, step_no, title, guide, start_line, end_line,
-                                        student_question, expected_discovery, focus)
-            VALUES (?,?,?,?,?,?,?,?,?)
-        ''', (diagnosis_id, step_no, title, guide, start_line, end_line, student_question, expected_discovery, focus))
+        cursor.execute(
+            '''
+            INSERT INTO guide_steps (
+                diagnosis_id,
+                step_no,
+                title,
+                guide,
+                start_line,
+                end_line,
+                student_question,
+                expected_discovery,
+                focus,
+                what_to_try_next
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                diagnosis_id,
+                step_no,
+                title,
+                guide,
+                start_line,
+                end_line,
+                student_question,
+                expected_discovery,
+                focus,
+                what_to_try_next,
+            ),
+        )
 
         conn.commit()
         step_id = cursor.lastrowid
@@ -468,6 +743,27 @@ class Database:
             cursor.execute(
                 'ALTER TABLE problems ADD COLUMN analysis_error TEXT DEFAULT ""'
             )
+
+    def _ensure_coach_columns(self, cursor):
+        def columns_of(table_name):
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            return [row[1] for row in cursor.fetchall()]
+
+        def add_column(table_name, column_name, sql):
+            if column_name not in columns_of(table_name):
+                cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {sql}")
+
+        add_column("code_records", "program_input", "program_input TEXT DEFAULT ''")
+        add_column("code_records", "program_output", "program_output TEXT DEFAULT ''")
+        add_column("code_records", "expected_output", "expected_output TEXT DEFAULT ''")
+        add_column("code_records", "error_message", "error_message TEXT DEFAULT ''")
+        add_column("code_records", "oj_result", "oj_result TEXT DEFAULT ''")
+        add_column("code_records", "extra_info", "extra_info TEXT DEFAULT ''")
+
+        add_column("diagnoses", "mode", "mode TEXT DEFAULT ''")
+        add_column("diagnoses", "status", "status TEXT DEFAULT ''")
+
+        add_column("guide_steps", "what_to_try_next", "what_to_try_next TEXT DEFAULT ''")
 
     def set_problem_analysis_status(self, problem_id, status, error=""):
         conn = self._get_connection()
