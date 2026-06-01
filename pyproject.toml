@@ -10,7 +10,7 @@ files = [
     "app/panel_manager.py",
     "app/problem_controller.py",
     "database.py",
-    "llm_integration.py",
+    "llm/llm_integration.py",
     "main.py",
     "mainwindow.py",
     "ui/form.ui",
