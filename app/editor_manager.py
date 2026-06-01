@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtWidgets import QTabWidget, QMessageBox, QFileDialog, QTextEdit
+from PySide6.QtGui import QColor, QTextCursor, QTextFormat
 from pyqcodeeditor.QCodeEditor import QCodeEditor
 from pyqcodeeditor.highlighters import QCXXHighlighter
 from pyqcodeeditor.completers import QCXXCompleter
@@ -153,6 +154,51 @@ class EditorManager:
     def cur_filepath(self):
         return getattr(self.tabs.currentWidget(),"file_path",None)
 
+    def current_code(self):
+        editor = self.tabs.currentWidget()
+        if editor is None:
+            return ""
+        return editor.toPlainText()
+
+    def highlight_lines(self, start_line, end_line):
+        editor = self.tabs.currentWidget()
+        if editor is None:
+            return
+
+        try:
+            start_line = int(start_line)
+            end_line = int(end_line)
+        except Exception:
+            return
+
+        if start_line <= 0 or end_line <= 0:
+            return
+
+        if start_line > end_line:
+            start_line, end_line = end_line, start_line
+
+        selections = []
+
+        for line_no in range(start_line, end_line + 1):
+            block = editor.document().findBlockByNumber(line_no - 1)
+
+            if not block.isValid():
+                continue
+
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = QTextCursor(block)
+            selection.cursor.clearSelection()
+            selection.format.setBackground(QColor("#fff3cd"))
+            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+            selections.append(selection)
+
+        editor.setExtraSelections(selections)
+
+    def clear_highlight(self):
+        editor = self.tabs.currentWidget()
+
+        if editor is not None:
+            editor.setExtraSelections([])
 
 
 

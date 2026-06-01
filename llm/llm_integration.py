@@ -1,6 +1,6 @@
 import json
 from database import Database
-from llm import analyze_problem, structure_problem_text, start_auto_coach_session
+from .llm import analyze_problem, structure_problem_text, start_auto_coach_session
 
 class LLMIntegration:
     def __init__(self, db: Database):

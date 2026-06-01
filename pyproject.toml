@@ -14,4 +14,5 @@ files = [
     "main.py",
     "mainwindow.py",
     "ui/form.ui",
+    "ui/coach_panel_ui.py",
 ]

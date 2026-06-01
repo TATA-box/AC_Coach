@@ -425,32 +425,36 @@
             </item>
            </layout>
           </widget>
-          <widget class="QTabWidget" name="aiWidget">
-           <property name="minimumSize">
-            <size>
-             <width>150</width>
-             <height>0</height>
-            </size>
-           </property>
-           <property name="maximumSize">
-            <size>
-             <width>16777215</width>
-             <height>16777215</height>
-            </size>
-           </property>
-           <property name="currentIndex">
-            <number>0</number>
-           </property>
-           <widget class="QWidget" name="tab">
-            <attribute name="title">
-             <string>Tab 1</string>
-            </attribute>
-           </widget>
-           <widget class="QWidget" name="tab_2">
-            <attribute name="title">
-             <string>Tab 2</string>
-            </attribute>
-           </widget>
+          <widget class="QWidget" name="aiwidget" native="true">
+           <layout class="QVBoxLayout" name="verticalLayout_3">
+            <property name="spacing">
+             <number>0</number>
+            </property>
+            <property name="leftMargin">
+             <number>0</number>
+            </property>
+            <property name="topMargin">
+             <number>0</number>
+            </property>
+            <property name="rightMargin">
+             <number>0</number>
+            </property>
+            <property name="bottomMargin">
+             <number>0</number>
+            </property>
+            <item>
+             <widget class="QStackedWidget" name="coachStack">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+               </sizepolicy>
+              </property>
+              <widget class="QWidget" name="coachConfigPage"/>
+              <widget class="QWidget" name="coachResultPage"/>
+             </widget>
+            </item>
+           </layout>
           </widget>
          </widget>
         </item>
@@ -511,6 +515,7 @@
     <property name="title">
      <string>Coach</string>
     </property>
+    <addaction name="act_config"/>
     <addaction name="act_analyse"/>
    </widget>
    <widget class="QMenu" name="menuQuestion">
@@ -689,6 +694,11 @@
   <action name="act_check">
    <property name="text">
     <string>Check</string>
+   </property>
+  </action>
+  <action name="act_config">
+   <property name="text">
+    <string>config</string>
    </property>
   </action>
  </widget>
