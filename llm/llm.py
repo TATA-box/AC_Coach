@@ -3,19 +3,14 @@ import re
 import queue
 import threading
 from openai import OpenAI
-from PySide6.QtCore import QSettings
 
-api_key = ""
+api_key = "一个API KEY"
 url = "https://api.deepseek.com"
 
 STEP_RE = re.compile(r"<step>\s*([\s\S]*?)\s*</step>", re.I)
 
 
 def get_client(api_key=api_key, url=url):
-    settings=QSettings("AC_coach", "AC_coach")
-    api_key=settings.value("deepseek/api_key", "")
-    if not api_key:
-        raise RuntimeError("API key not set")
     return OpenAI(api_key=api_key, base_url=url,timeout=60)
 
 
@@ -61,7 +56,7 @@ def call_json(system_prompt, user_prompt, model_name="deepseek-v4-flash", max_to
         raise RuntimeError(f"调用 LLM 失败：{e}") from e
 
 
-def stream_content(system_prompt, user_prompt, model_name="deepseek-v4-flash", max_tokens=4096,thinking="disabled", api_key=api_key, url=url):
+def stream_content(system_prompt, user_prompt, model_name="deepseek-v4-flash", max_tokens=16384,thinking="disabled", api_key=api_key, url=url):
     try:
         s = get_client(api_key, url).chat.completions.create(
             model=model_name,
@@ -133,7 +128,7 @@ def add_line_numbers(code):
         return ""
     return "\n".join(f"{i:>4}: {line}" for i, line in enumerate(code.splitlines(), 1))
 
-def cut(text, max_len=8000):
+def cut(text, max_len=65536):
     if text is None:
         return ""
     return text if len(text) <= max_len else text[:max_len] + "\n\n[内容过长，后面部分已省略]"
@@ -378,7 +373,7 @@ def diagnose_error(context, api_key=api_key, url=url, model_name="deepseek-v4-pr
     return call_json(system, user, model_name=model_name, thinking=thinking,api_key=api_key, url=url)
 
 
-def review_diagnosis(context, diagnosis, api_key=api_key, url=url, model_name="deepseek-v4-flash", thinking="disabled"):
+def review_diagnosis(context, diagnosis, api_key=api_key, url=url, model_name="deepseek-v4-pro", thinking="disabled"):
     system = """
 你是“程序设计实习”课程的调试复核助教。
 检查上一轮诊断是否和题目、代码、输出、报错相符；如果行号不准或证据不足，请修正。
@@ -399,7 +394,7 @@ def review_diagnosis(context, diagnosis, api_key=api_key, url=url, model_name="d
 def guide_prompt(max_steps=6):
     system = f"""
 你是“程序设计实习”课程的调试引导助教。
-生成 3 到 {max_steps} 个分步调试引导。每一步要短，适合点击“下一步”展示。
+生成 2 到 {max_steps} 个分步调试引导（除非问题特别简单，否则最好使用3步及以上）。每一步要短，适合点击“下一步”展示。
 像助教一样引导学生观察，不要直接宣布答案，不要给完整修复代码，不要输出隐藏思维链。
 步骤应递进：观察现象 -> 定位可疑代码 -> 比较题意/输出/状态 -> 点明矛盾 -> 总结错因。
 每一步 JSON 字段：step_no, title, focus, start_line, end_line, guide, student_question, expected_discovery。
@@ -429,7 +424,7 @@ def normalize_step(step, i):
     return step
 
 
-def generate_guide_steps(context, diagnosis, api_key=api_key, url=url,model_name="deepseek-v4-flash", thinking="disabled", max_steps=6):
+def generate_guide_steps(context, diagnosis, api_key=api_key, url=url,model_name="deepseek-v4-pro", thinking="disabled", max_steps=6):
     system, _ = guide_prompt(max_steps)
     user = f"""
 请根据下面的调试上下文和最终诊断，生成分步调试引导。
@@ -444,7 +439,7 @@ def generate_guide_steps(context, diagnosis, api_key=api_key, url=url,model_name
     return [normalize_step(s, i + 1) for i, s in enumerate(data.get("guide_steps", []))]
 
 
-def generate_guide_steps_stream(context, diagnosis, api_key=api_key, url=url,model_name="deepseek-v4-flash", thinking="disabled", max_steps=6):
+def generate_guide_steps_stream(context, diagnosis, api_key=api_key, url=url,model_name="deepseek-v4-pro", thinking="disabled", max_steps=6):
     _, system = guide_prompt(max_steps)
     user = f"""
 请根据下面的调试上下文和最终诊断，流式生成分步调试引导。
@@ -642,7 +637,7 @@ def analyze_student_need(context, api_key=api_key, url=url, model_name="deepseek
     return data
 
 
-def generate_next_hint_step(context, need_analysis=None, hint_history=None, api_key=api_key, url=url, model_name="deepseek-v4-flash", thinking="disabled"):
+def generate_next_hint_step(context, need_analysis=None, hint_history=None, api_key=api_key, url=url, model_name="deepseek-v4-pro", thinking="disabled"):
     system = """
 你是“程序设计实习”课程助教，学生现在还没有到适合纠错的阶段，需要一个“下一步提示”。
 你只能给一个很小的下一步提示，不能给完整解题路线，不能给一串阶梯提示，不能直接通向最终答案。
@@ -704,29 +699,6 @@ def generate_next_hint_step(context, need_analysis=None, hint_history=None, api_
     step = normalize_step(step, len(hint_history or []) + 1)
     step.setdefault("what_to_try_next", "")
     return step
-
-
-def summarize_error_record(archive_item, api_key=api_key, url=url, model_name="deepseek-v4-flash", thinking="disabled"):
-    system = """
-你是“程序设计实习”课程的错因整理助教。
-任务：把一次调试记录整理成适合放入个人错因库的卡片。
-不要给完整正确代码，不要扩展成新的题解。
-严格返回 JSON：
-{
-  "title": "错因卡片标题",
-  "error_type": "错误类型",
-  "root_cause": "根本原因",
-  "wrong_pattern": "学生这次错误的典型模式",
-  "knowledge_points": ["相关知识点"],
-  "review_question": "复习时可以问自己的问题",
-  "review_hint": "复习提示，不直接给答案",
-  "avoid_next_time": "下次避免方式",
-  "tags": ["标签"],
-  "review_priority": "low/medium/high"
-}
-"""
-    user = f"请整理下面这条调试归档记录：\n\n{json.dumps(archive_item, ensure_ascii=False)}"
-    return call_json(system, user, model_name=model_name, max_tokens=1536,thinking=thinking, api_key=api_key, url=url)
 
 
 class NextHintSession:
@@ -850,6 +822,298 @@ class AutoCoachSession:
 
 def start_auto_coach_session(**kwargs):
     return AutoCoachSession(**kwargs)
+
+
+
+def _pack(x, max_len=18000):
+    try:
+        s = json.dumps(x, ensure_ascii=False)
+    except TypeError:
+        s = str(x)
+    return cut(s, max_len)
+
+
+def _call_json_retry(system, user, model_name="deepseek-v4-pro", max_tokens=2048,
+                     thinking="enabled", api_key=api_key, url=url, retries=2):
+    last = None
+    for i in range(retries + 1):
+        try:
+            extra = "" if i == 0 else "\n\n注意：上一次返回不是合法 JSON。这一次只能返回一个 JSON 对象，不能有 Markdown，不能有解释。"
+            return call_json(system, user + extra, model_name=model_name, max_tokens=max_tokens,
+                             thinking=thinking, api_key=api_key, url=url)
+        except Exception as e:
+            last = e
+    raise RuntimeError(f"调用 LLM 失败，多次重试后仍然没有得到合法 JSON：{last}") from last
+
+
+def summarize_error_record(archive_item, api_key=api_key, url=url,
+                           model_name="deepseek-v4-pro", thinking="enabled"):
+    """
+    把一次调试记录压成短错因卡片。
+    这个卡片主要给后续复习聚类和自动出题用。
+    """
+    system = """
+你是程序设计课程的错因归纳器。
+把一次错误记录压缩成短错因卡片。
+不要写题解，不要写完整修复代码。
+严格只返回 JSON：
+{
+  "title": "一句话标题",
+  "error_type": "错误类型",
+  "root_cause": "根本原因，一句话",
+  "knowledge_points": ["知识点"],
+  "wrong_code_pattern": "错误代码模式，一句话",
+  "exam_focus": "后续出题应该重点考什么",
+  "priority": "high/medium/low"
+}
+"""
+    user = f"请整理这条调试记录：\n{_pack(archive_item, 12000)}"
+    return _call_json_retry(system, user, model_name, 1024, thinking, api_key, url)
+
+
+def analyze_review_history(error_cards=None, archive_items=None, user_prompt="", max_items=100,
+                           api_key=api_key, url=url, model_name="deepseek-v4-pro", thinking="enabled"):
+    """
+    把很多错因按知识点/能力点聚类。
+    这是后续复习资料和出题规划的基础。
+    """
+    error_cards = list(error_cards or [])[:max_items]
+    archive_items = list(archive_items or [])[:max_items]
+    system = """
+你是程序设计课程的复习分析器。
+用户可能有几十条甚至上百条历史错因。你要按知识点/能力点聚类，不要逐条复述。
+输出要短，但要能指导复习和出题。
+严格只返回 JSON：
+{
+  "summary": "总体概括",
+  "knowledge_groups": [
+    {
+      "name": "知识点或能力点",
+      "priority": "high/medium/low",
+      "typical_errors": ["典型错误模式"],
+      "exam_focus": "适合怎么考",
+      "suggested_question_types": ["short_blank/long_blank/rewrite"]
+    }
+  ],
+  "avoid_or_reduce": ["用户已经掌握或不建议重点考的内容"],
+  "global_exam_advice": "整体出题建议"
+}
+"""
+    user = f"""
+用户额外要求：
+{user_prompt}
+
+【错因卡片】
+{_pack(error_cards, 16000)}
+
+【原始记录，可选】
+{_pack(archive_items, 16000)}
+"""
+    return _call_json_retry(system, user, model_name, 3072, thinking, api_key, url)
+
+
+def generate_review_material(error_cards=None, archive_items=None, review_goal="期末复习",
+                             user_prompt="", max_items=100, api_key=api_key, url=url,
+                             model_name="deepseek-v4-pro", thinking="enabled"):
+    """
+    生成短复习资料。
+    输出重点：分知识点复习什么、怎么考。
+    """
+    analysis = analyze_review_history(error_cards, archive_items, user_prompt, max_items,
+                                      api_key, url, model_name, thinking)
+    system = """
+你是程序设计课程的复习材料整理器。
+根据知识点聚类，生成一份短复习材料。
+不要写长篇讲义，不要写完整题解。
+严格只返回 JSON：
+{
+  "title": "复习标题",
+  "summary": "总复习建议，尽量短",
+  "review_by_knowledge_point": [
+    {
+      "knowledge_point": "知识点",
+      "priority": "high/medium/low",
+      "what_to_review": "复习什么",
+      "how_to_test": "适合怎样考核"
+    }
+  ],
+  "recommended_exam_mix": {
+    "short_blank": "短代码补全适合考什么",
+    "long_blank": "长代码补全适合考什么",
+    "rewrite": "从零重写适合考什么"
+  }
+}
+"""
+    user = f"""
+复习目标：{review_goal}
+用户额外要求：{user_prompt}
+
+【知识点聚类分析】
+{_pack(analysis, 12000)}
+"""
+    ans = _call_json_retry(system, user, model_name, 2048, thinking, api_key, url)
+    ans["_analysis"] = analysis
+    return ans
+
+
+def plan_exam_paper(error_cards=None, archive_items=None, short_blank_count=2, long_blank_count=1,
+                    rewrite_count=1, language="python", difficulty="auto", user_prompt="",
+                    hidden_test_count=5, max_items=100, api_key=api_key, url=url,
+                    model_name="deepseek-v4-pro", thinking="enabled", review_analysis=None):
+    """
+    先整体规划一张卷子。
+    这里只规划每题考什么，不生成具体题面和代码。
+    """
+    analysis = review_analysis or analyze_review_history(error_cards, archive_items, user_prompt, max_items,
+                                                         api_key, url, model_name, thinking)
+    total = short_blank_count + long_blank_count + rewrite_count
+    system = """
+你是程序设计课程的出题总规划器。
+根据学生历史错因和用户要求，规划一张小测卷。
+要求：
+1. 题目数量必须等于用户要求。
+2. short_blank/long_blank/rewrite 的数量必须分别符合用户要求。
+3. 避开用户明确说不想考的内容。
+4. 不要生成题面，不要生成代码，只生成每题规格。
+严格只返回 JSON：
+{
+  "paper_title": "试卷标题",
+  "paper_goal": "这张卷子想考什么",
+  "question_specs": [
+    {
+      "qid": 1,
+      "question_type": "short_blank/long_blank/rewrite",
+      "focus": "本题考核重点",
+      "related_knowledge_points": ["知识点"],
+      "difficulty": "easy/medium/hard",
+      "note": "给具体出题模型的要求"
+    }
+  ]
+}
+"""
+    user = f"""
+语言：{language}
+难度：{difficulty}
+隐藏测试数量：{hidden_test_count}
+short_blank 数量：{short_blank_count}
+long_blank 数量：{long_blank_count}
+rewrite 数量：{rewrite_count}
+总题数：{total}
+
+用户额外要求：
+{user_prompt}
+
+【知识点聚类分析】
+{_pack(analysis, 12000)}
+"""
+    plan = _call_json_retry(system, user, model_name, 3072, thinking, api_key, url)
+    plan["_review_analysis"] = analysis
+    return plan
+
+
+def generate_exam_question(spec, review_analysis=None, language="python", hidden_test_count=5,
+                           user_prompt="", api_key=api_key, url=url,
+                           model_name="deepseek-v4-pro", thinking="enabled"):
+    """
+    根据一条题目规格生成一道考核题。
+    只传 spec + 精简 review_analysis，避免每道题反复吃大量历史记录。
+    返回中的 standard_code 和 hidden_tests 都不能展示给用户。
+    """
+    system = """
+你是程序设计课程的自动出题器。
+你要根据题目规格生成一道考核题，而不是讲解题。
+
+题型：
+1. short_blank：短代码补全，通常补一行或一个表达式。
+2. long_blank：长代码补全，通常补一个函数、一个循环体或一段核心逻辑。
+3. rewrite：从零开始重写整题。
+
+要求：
+1. 只设计隐藏测试输入，不要设计输出。
+2. 必须给出 standard_code，供后台运行得到标准输出；standard_code 不能展示给用户。
+3. standard_code 必须能直接读 stdin，并向 stdout 打印答案。
+4. user_view 不能泄露 standard_code 和 hidden_tests。
+5. 补全题必须在 user_view.code_template 中使用 ___BLANK_1___ 这类标记。
+6. rewrite 类型的 code_template 可以为空。
+7. hidden_tests 只允许包含 input 字段。
+8. hidden_tests 至少覆盖普通情况、边界情况、容易犯错的情况。
+9. 题目不要太长，除非题型是 rewrite 且确实需要。
+严格只返回 JSON：
+{
+  "qid": 1,
+  "question_type": "short_blank/long_blank/rewrite",
+  "language": "python",
+  "title": "题目标题",
+  "tested_knowledge_points": ["知识点"],
+  "user_view": {
+    "problem_statement": "给用户看的题面",
+    "code_template": "给用户看的代码模板；rewrite 可为空",
+    "submit_instruction": "提交说明"
+  },
+  "standard_code": "后台标准答案代码",
+  "hidden_tests": [
+    {"input": "测试输入"}
+  ]
+}
+"""
+    user = f"""
+语言：{language}
+隐藏测试数量：{hidden_test_count}
+用户额外要求：{user_prompt}
+
+【本题规格】
+{_pack(spec, 4000)}
+
+【整体复习分析】
+{_pack(review_analysis or {}, 10000)}
+"""
+    q = _call_json_retry(system, user, model_name, 4096, thinking, api_key, url)
+    q.setdefault("qid", spec.get("qid"))
+    q.setdefault("question_type", spec.get("question_type"))
+    q.setdefault("language", language)
+    q.setdefault("hidden_tests", [])
+    q["hidden_tests"] = q["hidden_tests"][:hidden_test_count]
+    return q
+
+
+def generate_exam_paper(error_cards=None, archive_items=None, short_blank_count=2, long_blank_count=1,
+                        rewrite_count=1, language="python", difficulty="auto", user_prompt="",
+                        hidden_test_count=5, max_workers=3, max_items=100, api_key=api_key, url=url,
+                        analysis_model_name="deepseek-v4-pro", plan_model_name="deepseek-v4-pro",
+                        question_model_name="deepseek-v4-pro", thinking="enabled", fail_fast=False):
+    """
+    生成一整张考核卷。
+    流程：分析历史错因 -> 规划整张卷子 -> 并行生成每一道题。
+    单题失败默认不会炸掉整张卷子，而是放进 failed_questions。
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    analysis = analyze_review_history(error_cards, archive_items, user_prompt, max_items,
+                                      api_key, url, analysis_model_name, thinking)
+    plan = plan_exam_paper(error_cards, archive_items, short_blank_count, long_blank_count, rewrite_count,
+                           language, difficulty, user_prompt, hidden_test_count, max_items,
+                           api_key, url, plan_model_name, thinking, analysis)
+    specs = plan.get("question_specs", [])
+    questions, failed = [], []
+
+    def work(sp):
+        return generate_exam_question(sp, analysis, language, hidden_test_count, user_prompt,
+                                      api_key, url, question_model_name, thinking)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = {ex.submit(work, sp): sp for sp in specs}
+        for fut in as_completed(futs):
+            sp = futs[fut]
+            try:
+                questions.append(fut.result())
+            except Exception as e:
+                if fail_fast:
+                    raise
+                failed.append({"spec": sp, "error": str(e)})
+
+    questions.sort(key=lambda q: q.get("qid") or 0)
+    return {"paper_plan": plan, "questions": questions, "failed_questions": failed}
+
 
 if __name__ == "__main__":
     problem_text = """
