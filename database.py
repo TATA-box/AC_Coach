@@ -159,7 +159,7 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
 
-        return [{"id":row[0], "title":row[1], "created_at":row[2]} for row in rows]
+        return [dict(row) for row in rows]
 
     def get_problem(self, problem_id):
         conn = self._get_connection()
