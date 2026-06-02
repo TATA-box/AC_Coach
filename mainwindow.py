@@ -1,12 +1,16 @@
 from pathlib import Path
-from PySide6.QtWidgets import (QFileDialog,QFileSystemModel,QMainWindow,QMessageBox,)
+
+from PySide6.QtCore import QTimer,QSettings
+from PySide6.QtWidgets import (QFileDialog,QFileSystemModel,QMainWindow,QMessageBox,QInputDialog,QLineEdit,)
+
 from ui.ui_form import Ui_MainWindow
 from app.editor_manager import EditorManager
 from app.cpp_runner import CppRunner
 from app.panel_manager import PanelManager
+from app.problem_controller import ProblemController
+from app.coach_service import CoachController
 from database import Database
-from llm_integration import LLMIntegration
-import json
+
 
 class MainWindow(QMainWindow):
     def __init__(self, parent=None):
@@ -17,151 +21,32 @@ class MainWindow(QMainWindow):
         self.filemodel=None
         self.setup_filetree()
 
+        self.db=Database()
+
         self.editor_manager=EditorManager(self.ui.editorWidget)
         self.panel_manager=PanelManager(self.ui)
         self.cpp_runner=CppRunner(self)
 
-        self.connect_signals()
-
-
-
-        self.test_database_and_llm()#测试用的，之后要删
-
-
-    def test_database_and_llm(self):
-        """测试数据库和 LLM 集成"""
-        print("=" * 50)
-        print("开始测试数据库和 LLM 集成")
-        print("=" * 50)
-
-        # 1. 初始化数据库（使用测试文件，避免影响正式数据）
-        db = Database("test_accoach.db")
-        llm_int = LLMIntegration(db)
-
-        # ========== 测试1: 添加题目 ==========
-        print("\n【测试1】添加题目")
-        problem_text = """给定一个长度为 n 的整数序列，请求出它的最大连续子段和。
-1 <= n <= 100000
--10000 <= ai <= 10000
-样例输入：
-5
-1 2 -3 4 5
-样例输出：
-9
-解释：4+5=9 是最大子段和
-"""
-
-        problem_id, analysis, problem_struct = llm_int.analyze_and_save_problem(problem_text, "最大连续子段和")
-        print(f"题目添加成功，ID: {problem_id}")
-
-        # ========== 测试2: 调试模式 ==========
-        print("\n【测试2】调试模式测试")
-
-        wrong_code = """n = int(input())
-a = list(map(int, input().split()))
-ans = 0
-cur = 0
-for x in a:
-    cur = max(0, cur + x)
-    ans = max(ans, cur)
-print(ans)
-"""
-
-        diagnosis_id, mode, diagnosis_dict, steps = llm_int.diagnose_and_save(
-            problem_id=problem_id,
-            problem_text=problem_text,
-            problem_analysis=analysis,
-            code=wrong_code,
-            program_output="9",
-            expected_output="9",
-            extra_info="代码在样例上能通过，但提交到 OJ 后 WA"
+        self.problem_controller=ProblemController(
+            window=self,
+            editor_manager=self.editor_manager,
+            db=self.db,
         )
 
-        print(f"诊断ID: {diagnosis_id}")
-        print(f"模式: {mode}")
-        print(f"生成步骤数: {len(steps)}")
-        if diagnosis_dict:
-            print(f"错误类型: {diagnosis_dict.get('error_type', '无')}")
-            print(f"错误概括: {diagnosis_dict.get('error_summary', '无')[:100]}")
+        self.coach_controller = CoachController(
+            window=self,
+            editor_manager=self.editor_manager,
+            db=self.db,
+        )
 
-        # ========== 测试3: 获取引导步骤 ==========
-        print("\n【测试3】获取引导步骤")
-        steps = db.get_guide_steps(diagnosis_id)
-        for step in steps:
-            print(f"  步骤{step['step_no']}: {step['title']}")
+        self.settings=QSettings("AC_coach", "AC_coach")
+        self.llm_api_key=self.settings.value("deepseek/api_key","")
 
-        print("\n" + "=" * 50)
-        print("测试完成！")
-        print("=" * 50)
-        self.print_all_tables()
+        self.ai_panel_default_width=390
+        QTimer.singleShot(0,self.hide_ai_panel)
 
-    def print_all_tables(self):
-        """打印数据库中所有表的内容"""
-        print("\n" + "=" * 60)
-        print("数据库全部内容")
-        print("=" * 60)
+        self.connect_signals()
 
-        db = Database("test_accoach.db")  # 使用你测试用的数据库
-
-        # 1. problems 表
-        print("\n【problems 表】")
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM problems")
-        rows = cursor.fetchall()
-        for row in rows:
-            print(dict(row))
-        conn.close()
-
-        # 2. code_records 表
-        print("\n【code_records 表】")
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM code_records")
-        rows = cursor.fetchall()
-        for row in rows:
-            print(dict(row))
-        conn.close()
-
-        # 3. diagnoses 表
-        print("\n【diagnoses 表】")
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM diagnoses")
-        rows = cursor.fetchall()
-        for row in rows:
-            d = dict(row)
-            # 截断过长的字段
-            if d.get("knowledge_points"):
-                d["knowledge_points"] = d["knowledge_points"][:100] + "..."
-            if d.get("suspected_locations"):
-                d["suspected_locations"] = d["suspected_locations"][:100] + "..."
-            print(d)
-        conn.close()
-
-        # 4. guide_steps 表
-        print("\n【guide_steps 表】")
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM guide_steps")
-        rows = cursor.fetchall()
-        for row in rows:
-            print(dict(row))
-        conn.close()
-
-        # 5. mistake_library 表
-        print("\n【mistake_library 表】")
-        conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM mistake_library")
-        rows = cursor.fetchall()
-        for row in rows:
-            print(dict(row))
-        conn.close()
-
-        print("\n" + "=" * 60)
-        print("打印完成")
-        print("=" * 60)
 
     def setup_filetree(self):
         self.filemodel=QFileSystemModel(self)
@@ -175,15 +60,23 @@ print(ans)
         self.ui.act_exit.triggered.connect(self.close)
         self.ui.act_about.triggered.connect(self.show_about)
         self.ui.act_openfolder.triggered.connect(self.openfolder)
-        self.ui.projectTree.doubleClicked.connect(self.openfile)
         self.ui.act_save.triggered.connect(self.savefile)
         self.ui.act_saveall.triggered.connect(self.saveall)
-        self.ui.act_new.triggered.connect(self.editor_manager.createfile)
+        self.ui.act_new.triggered.connect(self.new_file_then_modify)
+
+        self.ui.projectTree.doubleClicked.connect(self.openfile)
+
+        self.ui.act_modify.triggered.connect(self.problem_controller.modify_current_problem)
+        self.ui.act_check.triggered.connect(self.problem_controller.check_current_problem)
+
+        self.ui.act_config.triggered.connect(self.config_api_key)
+        self.ui.act_analyse.triggered.connect(self.summon_coach)
 
         self.ui.act_compile_run.triggered.connect(self.compile_run)
 
         self.cpp_runner.output.connect(self.panel_manager.append_output)
         self.cpp_runner.problems_ready.connect(self.panel_manager.show_problems)
+        self.cpp_runner.run_context_ready.connect(self.coach_controller.set_latest_run_context)
 
         self.ui.act_undo.triggered.connect(self.editor_manager.undo)
         self.ui.act_redo.triggered.connect(self.editor_manager.redo)
@@ -230,10 +123,81 @@ print(ans)
             return
 
     def compile_run(self):
-        path=self.editor_manager.cur_filepath()
         if not self.editor_manager.savefile():
             QMessageBox.information(self,"Run","Save failed.")
             return
+        path=self.editor_manager.cur_filepath()
+        if path is None:
+            QMessageBox.information(self, "Run", "No file to run.")
+            return
         self.panel_manager.clear_all()
         self.cpp_runner.compile_run(path)
+
+    def new_file_then_modify(self):
+        success=self.editor_manager.createfile()
+        if not success:
+            QMessageBox.information(self, "New", "Create file failed.")
+            return
+        self.problem_controller.modify_current_problem()
+
+    def show_ai_panel(self):
+        splitter=self.ui.codingMainSplitter
+        sizes=splitter.sizes()
+        total=sum(sizes) if sum(sizes)>0 else splitter.width()
+        tree_width=sizes[0] if len(sizes)>=1 and sizes[0]>0 else 160
+        right_width=self.ai_panel_default_width
+        center_width=max(450,total-tree_width-right_width)
+        splitter.setSizes([tree_width,center_width,right_width])
+        self.ui.aiwidget.show()
+        self.ai_panel_visible=True
+
+    def hide_ai_panel(self):
+        splitter=self.ui.codingMainSplitter
+        sizes=splitter.sizes()
+        total=sum(sizes) if sum(sizes)>0 else splitter.width()
+        tree_width=sizes[0] if len(sizes)>=1 and sizes[0]>0 else 160
+        center_width=max(450,total-tree_width)
+        splitter.setSizes([tree_width,center_width,0])
+        self.ai_panel_visible=False
+
+    def summon_coach(self):
+        if not self.ensure_api_key():
+            return
+        self.show_ai_panel()
+        self.coach_controller.show_config_page()
+
+    def config_api_key(self):
+        text,ok =QInputDialog.getText(
+            self,
+            "配置 API Key",
+            "请输入 DeepSeek API Key：",
+            QLineEdit.Password,
+            self.llm_api_key,
+        )
+        if not ok:
+            return False
+        text=(text or "").strip()
+        if not text:
+            QMessageBox.warning(self,"配置 API Key","API Key 不能为空。")
+            return False
+        self.llm_api_key=text
+        self.settings.setValue("deepseek/api_key", self.llm_api_key)
+        self.settings.sync()
+        QMessageBox.information(self, "配置 API Key", "API Key 已保存。")
+        return True
+
+    def ensure_api_key(self):
+        self.llm_api_key = self.settings.value("deepseek/api_key", "")
+        if (self.llm_api_key or "").strip():
+            return True
+        reply = QMessageBox.question(
+            self,
+            "AI 助教",
+            "还没有配置 DeepSeek API Key，是否现在配置？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return False
+        return self.config_api_key()
 

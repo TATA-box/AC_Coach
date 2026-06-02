@@ -6,6 +6,7 @@ class CppRunner(QObject):
 
     output=Signal(str)
     problems_ready=Signal(list)
+    run_context_ready = Signal(dict)
 
     def __init__(self,parent=None):
         super().__init__(parent)
@@ -83,6 +84,12 @@ class CppRunner(QObject):
 
         if success:
             self.output.emit("Compile succeeded.")
+            self.run_context_ready.emit({
+                "run_status": "compile_success",
+                "error_message": "",
+                "program_output": "",
+                "run_success": True,
+            })
 
             if not self.exepath.exists():
                self.output.emit("Executable file does not exist.")
@@ -99,14 +106,29 @@ class CppRunner(QObject):
 
         else:
             self.output.emit("Compile failed.")
+            self.run_context_ready.emit({
+                "run_status": "compile_error",
+                "error_message": self.errortext or "Compile failed.",
+                "program_output": "",
+                "run_success": False,
+            })
 
-    def compile_error(self,error):
+    def compile_error(self, error):
+        error_str = ""
         if self.process:
             error_str = self.process.errorString()
             self.output.emit(f"❌ 编译器启动失败详情：{error_str}")
+
         self.output.emit("Failed to start compiler.")
+        self.run_context_ready.emit({
+            "run_status": "compiler_start_error",
+            "error_message": error_str or "Failed to start compiler.",
+            "program_output": "",
+            "run_success": False,
+        })
         if self.process is not None:
             self.process.deleteLater()
-            self.process=None
+            self.process = None
+
 
 

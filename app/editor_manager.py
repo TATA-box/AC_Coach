@@ -1,6 +1,20 @@
 from pathlib import Path
-from PySide6.QtWidgets import QPlainTextEdit,QTabWidget,QMessageBox,QFileDialog
+
+from PySide6.QtWidgets import QTabWidget, QMessageBox, QFileDialog, QTextEdit
+from PySide6.QtGui import QColor, QTextCursor, QTextFormat
+from pyqcodeeditor.QCodeEditor import QCodeEditor
+from pyqcodeeditor.highlighters import QCXXHighlighter
+from pyqcodeeditor.completers import QCXXCompleter
+
 from .file_manager import FileManager
+
+
+class CodeEditor(QCodeEditor):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.setHighlighter(QCXXHighlighter())
+        self.setCompleter(QCXXCompleter())
 
 class EditorManager:
     def __init__(self,_tabs:QTabWidget):
@@ -10,9 +24,8 @@ class EditorManager:
         self.tabs.tabCloseRequested.connect(self.closefile)
 
     def createfile(self)->bool:
-        editor = QPlainTextEdit()
-        editor.setLineWrapMode(QPlainTextEdit.NoWrap)
-        editor.file_path = None
+        editor=CodeEditor()
+        editor.file_path=None
         editor.document().setModified(False)
         editor.document().modificationChanged.connect(
             lambda modified: self.update_tabtitle(editor, modified)
@@ -39,9 +52,8 @@ class EditorManager:
 
         try:text=self.file_manager.readfile(path)
         except Exception:return False
-        editor=QPlainTextEdit()
+        editor=CodeEditor()
         editor.setPlainText(text)
-        editor.setLineWrapMode(QPlainTextEdit.NoWrap)
         editor.file_path=path
         editor.document().setModified(False)
         editor.document().modificationChanged.connect(
@@ -142,6 +154,51 @@ class EditorManager:
     def cur_filepath(self):
         return getattr(self.tabs.currentWidget(),"file_path",None)
 
+    def current_code(self):
+        editor = self.tabs.currentWidget()
+        if editor is None:
+            return ""
+        return editor.toPlainText()
+
+    def highlight_lines(self, start_line, end_line):
+        editor = self.tabs.currentWidget()
+        if editor is None:
+            return
+
+        try:
+            start_line = int(start_line)
+            end_line = int(end_line)
+        except Exception:
+            return
+
+        if start_line <= 0 or end_line <= 0:
+            return
+
+        if start_line > end_line:
+            start_line, end_line = end_line, start_line
+
+        selections = []
+
+        for line_no in range(start_line, end_line + 1):
+            block = editor.document().findBlockByNumber(line_no - 1)
+
+            if not block.isValid():
+                continue
+
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = QTextCursor(block)
+            selection.cursor.clearSelection()
+            selection.format.setBackground(QColor("#fff3cd"))
+            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+            selections.append(selection)
+
+        editor.setExtraSelections(selections)
+
+    def clear_highlight(self):
+        editor = self.tabs.currentWidget()
+
+        if editor is not None:
+            editor.setExtraSelections([])
 
 
 
