@@ -12,9 +12,38 @@ from .file_manager import FileManager
 class CodeEditor(QCodeEditor):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._coach_extra_selections = []
+        self._editor_extra_selections = []
+        self._updating_extra_selections = False
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.setHighlighter(QCXXHighlighter())
         self.setCompleter(QCXXCompleter())
+
+    def setExtraSelections(self, selections):
+        if not hasattr(self, "_coach_extra_selections") or self._updating_extra_selections:
+            super().setExtraSelections(selections)
+            return
+
+        self._editor_extra_selections = list(selections or [])
+        self._apply_extra_selections()
+
+    def set_coach_extra_selections(self, selections):
+        self._coach_extra_selections = list(selections or [])
+        self._apply_extra_selections()
+
+    def clear_coach_extra_selections(self):
+        self._coach_extra_selections = []
+        self._apply_extra_selections()
+
+    def _apply_extra_selections(self):
+        self._updating_extra_selections = True
+        try:
+            super().setExtraSelections(
+                self._editor_extra_selections + self._coach_extra_selections
+            )
+        finally:
+            self._updating_extra_selections = False
+
 
 class EditorManager:
     def __init__(self,_tabs:QTabWidget):
@@ -191,14 +220,22 @@ class EditorManager:
             selection.format.setBackground(QColor("#fff3cd"))
             selection.format.setProperty(QTextFormat.FullWidthSelection, True)
             selections.append(selection)
-
-        editor.setExtraSelections(selections)
+        editor.set_coach_extra_selections(selections)
+        if selections:
+            target_block = editor.document().findBlockByNumber(start_line - 1)
+            if target_block.isValid():
+                cursor = QTextCursor(target_block)
+                editor.setTextCursor(cursor)
+                if hasattr(editor, "centerCursor"):
+                    editor.centerCursor()
+                elif hasattr(editor, "ensureCursorVisible"):
+                    editor.ensureCursorVisible()
 
     def clear_highlight(self):
         editor = self.tabs.currentWidget()
-
         if editor is not None:
-            editor.setExtraSelections([])
+            editor.clear_coach_extra_selections()
+
 
 
 
