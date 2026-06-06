@@ -3,14 +3,19 @@ import re
 import queue
 import threading
 from openai import OpenAI
+from PySide6.QtCore import QSettings
 
-api_key = "一个API KEY"
+api_key = ""
 url = "https://api.deepseek.com"
 
 STEP_RE = re.compile(r"<step>\s*([\s\S]*?)\s*</step>", re.I)
 
 
 def get_client(api_key=api_key, url=url):
+    settings=QSettings("AC_coach", "AC_coach")
+    api_key=settings.value("deepseek/api_key", "")
+    if not api_key:
+        raise RuntimeError("API key not set")
     return OpenAI(api_key=api_key, base_url=url,timeout=60)
 
 
@@ -957,7 +962,7 @@ def generate_review_material(error_cards=None, archive_items=None, review_goal="
 
 
 def plan_exam_paper(error_cards=None, archive_items=None, short_blank_count=2, long_blank_count=1,
-                    rewrite_count=1, language="python", difficulty="auto", user_prompt="",
+                    rewrite_count=1, language="C++", difficulty="auto", user_prompt="",
                     hidden_test_count=5, max_items=100, api_key=api_key, url=url,
                     model_name="deepseek-v4-pro", thinking="enabled", review_analysis=None):
     """
@@ -1011,7 +1016,7 @@ rewrite 数量：{rewrite_count}
     return plan
 
 
-def generate_exam_question(spec, review_analysis=None, language="python", hidden_test_count=5,
+def generate_exam_question(spec, review_analysis=None, language="C++", hidden_test_count=5,
                            user_prompt="", api_key=api_key, url=url,
                            model_name="deepseek-v4-pro", thinking="enabled"):
     """
@@ -1038,6 +1043,11 @@ def generate_exam_question(spec, review_analysis=None, language="python", hidden
 7. hidden_tests 只允许包含 input 字段。
 8. hidden_tests 至少覆盖普通情况、边界情况、容易犯错的情况。
 9. 题目不要太长，除非题型是 rewrite 且确实需要。
+10. problem_statement 中的代码（如有 bug 的代码、示例代码等）必须用 Markdown 代码块包裹，格式为：
+    ```cpp
+    代码内容
+11. 如果 code_template 不为空，那么不需要在problem_statement中重复给出完整代码模板。
+12. code_template 在正确补全后必须是完整的、可以独立编译的 C++ 程序，包含所有必要的 #include 和 main 函数。
 严格只返回 JSON：
 {
   "qid": 1,
@@ -1077,7 +1087,7 @@ def generate_exam_question(spec, review_analysis=None, language="python", hidden
 
 
 def generate_exam_paper(error_cards=None, archive_items=None, short_blank_count=2, long_blank_count=1,
-                        rewrite_count=1, language="python", difficulty="auto", user_prompt="",
+                        rewrite_count=1, language="C++", difficulty="auto", user_prompt="",
                         hidden_test_count=5, max_workers=3, max_items=100, api_key=api_key, url=url,
                         analysis_model_name="deepseek-v4-pro", plan_model_name="deepseek-v4-pro",
                         question_model_name="deepseek-v4-pro", thinking="enabled", fail_fast=False):

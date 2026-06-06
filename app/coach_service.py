@@ -9,6 +9,8 @@ from llm import (
     start_auto_coach_session,
     start_debug_guide_session,
     start_next_hint_session,
+    summarize_error_record,
+    generate_exam_paper,
 )
 
 
@@ -26,6 +28,34 @@ def _json_dump(value):
 
 def _normalize_code_for_compare(code):
     return (code or "").strip()
+
+def extract_wrong_code(full_code, diagnosis, context_lines=5):
+    """从完整代码中提取错误相关代码片段"""
+    if not full_code or not diagnosis:
+        return ""
+
+    suspected_locations = diagnosis.get("suspected_locations", [])
+    if not suspected_locations:
+        return ""
+
+    lines = full_code.splitlines()
+    extracted_parts = []
+
+    for location in suspected_locations:
+        start = location.get("start_line", 1)
+        end = location.get("end_line", start)
+
+        start_idx = max(0, start - 1)
+        end_idx = min(len(lines), end)
+
+        # 提取上下文（前后各 context_lines 行）
+        context_start = max(0, start_idx - context_lines)
+        context_end = min(len(lines), end_idx + context_lines)
+
+        part_lines = lines[context_start:context_end]
+        extracted_parts.append("\n".join(part_lines))
+
+    return "\n\n...\n\n".join(extracted_parts)
 
 class FunctionWorker(QObject):
     finished = Signal(object)
@@ -423,8 +453,61 @@ class CoachController(QObject):
             raw_response=_json_dump(diagnosis),
             status="finished",
         )
+        try:
+            # 获取当前的上下文信息，用于构建 archive_item
+            problem = self.db.get_problem(self.problem_id) if self.problem_id else None
+            code_record = self.db.get_latest_code_record_by_problem(self.problem_id) if self.problem_id else None
+            if problem and code_record and self.diagnosis_id:
+                archive_item = {
+                    "problem_text": problem.get("content", ""),
+                    "problem_analysis": {
+                        "summary": problem.get("summary", ""),
+                        "input_format": problem.get("input_format", ""),
+                        "output_format": problem.get("output_format", ""),
+                        "knowledge_points": _json_load(problem.get("knowledge_points"), []),
+                        "constraints": _json_load(problem.get("constraints"), []),
+                        "common_pitfalls": _json_load(problem.get("common_pitfalls"), []),
+                        "suggested_approach": _json_load(problem.get("suggested_approach"), []),
+                        "difficulty": problem.get("difficulty", ""),
+                    },
+                    "code": code_record.get("code_content", ""),
+                    "program_input": code_record.get("program_input", ""),
+                    "program_output": code_record.get("program_output", ""),
+                    "expected_output": code_record.get("expected_output", ""),
+                    "error_message": code_record.get("error_message", ""),
+                    "oj_result": code_record.get("oj_result", ""),
+                    "extra_info": code_record.get("extra_info", ""),
+                    "diagnosis": diagnosis,  # 诊断结果
+                }
 
-        self.panel.set_status("调试结束，诊断结果已保存。")
+                error_card = summarize_error_record(archive_item)
+                self.db.add_mistake(
+                    problem_id=self.problem_id,
+                    diagnosis_id=self.diagnosis_id,
+                    error_type=error_card.get("error_type", diagnosis.get("error_type", "")),
+                    error_description=error_card.get("title", diagnosis.get("error_summary", "")),
+                    wrong_code=extract_wrong_code(code_record.get("code_content", ""), diagnosis),  # 可选：提取错误代码片段
+                    knowledge_points=_json_dump(error_card.get("knowledge_points", [])),
+                    error_card_title=error_card.get("title", ""),
+                    root_cause=error_card.get("root_cause", ""),
+                    wrong_pattern=error_card.get("wrong_code_pattern", ""),
+                    review_question=error_card.get("review_question", ""),
+                    review_hint=error_card.get("review_hint", ""),
+                    avoid_next_time=error_card.get("avoid_next_time", ""),
+                    tags=_json_dump(error_card.get("tags", [])),
+                    review_priority=error_card.get("review_priority", "medium"),
+                )
+
+                self.panel.set_status("调试结束，诊断结果和错因卡片已保存。")
+            else:
+                self.panel.set_status("调试结束，诊断结果已保存。")
+
+
+        except Exception as e:
+            # 错因卡片生成失败不影响主流程
+            print(f"生成错因卡片失败：{e}")
+            self.panel.set_status("调试结束，诊断结果已保存（错因卡片生成失败）。")
+
 
     def run_in_thread(self, func, on_success):
         thread = QThread(self.window)
@@ -472,4 +555,17 @@ class CoachController(QObject):
         )
 
         QMessageBox.warning(self.window, "AI 助教", message)
+
+    def generate_exam_paper(self, error_cards, short_blank_count=2, long_blank_count=1, rewrite_count=1, user_prompt=""):
+        try:
+            paper = generate_exam_paper(
+                error_cards=error_cards,
+                short_blank_count=short_blank_count,
+                long_blank_count=long_blank_count,
+                rewrite_count=rewrite_count,
+                user_prompt=user_prompt,
+            )
+            return paper, None
+        except Exception as e:
+            return None, str(e)
 
