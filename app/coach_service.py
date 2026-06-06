@@ -327,7 +327,7 @@ class CoachController(QObject):
 
         start_line = step.get("start_line")
         end_line = step.get("end_line")
-
+        self.editor_manager.clear_highlight()
         if start_line is not None and end_line is not None:
             self.editor_manager.highlight_lines(start_line, end_line)
 
