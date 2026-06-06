@@ -120,7 +120,6 @@ class Database:
                     wrong_code_start_line INTEGER,
                     wrong_code_end_line INTEGER,
                     knowledge_points TEXT,
-                    correct_suggestion TEXT,
                     is_mastered BOOLEAN DEFAULT 0,
                     error_card_title TEXT,
                     root_cause TEXT,
@@ -133,6 +132,34 @@ class Database:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE,
                     FOREIGN KEY (diagnosis_id) REFERENCES diagnoses(id) ON DELETE CASCADE
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS exam_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                exam_id TEXT NOT NULL,
+                question_id INTEGER NOT NULL,
+                question_type TEXT,
+                title TEXT,
+                problem_statement TEXT,
+                code_template TEXT,
+                user_code TEXT,
+                standard_code TEXT,
+                hidden_tests TEXT,
+                last_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT "in_progress"
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS exam_submissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                attempt_id INTEGER,
+                user_code TEXT,
+                result TEXT,
+                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (attempt_id) REFERENCES exam_attempts(id) ON DELETE CASCADE
             )
         ''')
         self._ensure_problem_analysis_columns(cursor)
@@ -526,8 +553,7 @@ class Database:
 
     def add_mistake(self, problem_id, diagnosis_id, error_type, error_description="", wrong_code="",
                         wrong_code_start_line=None, wrong_code_end_line=None,
-                        knowledge_points="", correct_suggestion="",
-                        error_card_title="", root_cause="", wrong_pattern="",
+                        knowledge_points="", error_card_title="", root_cause="", wrong_pattern="",
                         review_question="", review_hint="", avoid_next_time="",
                         tags="", review_priority=""):
         conn = self._get_connection()
@@ -536,13 +562,13 @@ class Database:
         cursor.execute('''
             INSERT INTO mistake_library (
                 problem_id, diagnosis_id, error_type, error_description, wrong_code,
-                wrong_code_start_line, wrong_code_end_line, knowledge_points, correct_suggestion,
+                wrong_code_start_line, wrong_code_end_line, knowledge_points, 
                 error_card_title, root_cause, wrong_pattern,
                 review_question, review_hint, avoid_next_time,
                 tags, review_priority
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ''', (problem_id, diagnosis_id, error_type, error_description, wrong_code,
-                wrong_code_start_line, wrong_code_end_line, knowledge_points, correct_suggestion,
+                wrong_code_start_line, wrong_code_end_line, knowledge_points, 
                 error_card_title, root_cause, wrong_pattern,
                 review_question, review_hint, avoid_next_time,
                 tags, review_priority))
@@ -779,5 +805,120 @@ class Database:
             (status, error, problem_id)
         )
 
+        conn.commit()
+        conn.close()
+
+    def save_exam_attempt(self, exam_id, question_id, question_type, title,
+                          problem_statement, code_template, user_code,
+                          standard_code, hidden_tests):
+        """保存或更新考题答题记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        # 检查是否已存在
+        cursor.execute('''
+            SELECT id FROM exam_attempts
+            WHERE exam_id = ? AND question_id = ?
+        ''', (exam_id, question_id))
+
+        existing = cursor.fetchone()
+
+        if existing:
+            cursor.execute('''
+                UPDATE exam_attempts
+                SET user_code = ?, last_modified = CURRENT_TIMESTAMP, status = ?
+                WHERE exam_id = ? AND question_id = ?
+            ''', (user_code, "in_progress", exam_id, question_id))
+            attempt_id = existing["id"]
+        else:
+            cursor.execute('''
+                INSERT INTO exam_attempts (
+                    exam_id, question_id, question_type, title,
+                    problem_statement, code_template, user_code,
+                    standard_code, hidden_tests, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (exam_id, question_id, question_type, title,
+                  problem_statement, code_template, user_code,
+                  standard_code, hidden_tests, "in_progress"))
+            attempt_id = cursor.lastrowid
+
+        conn.commit()
+        conn.close()
+        return attempt_id
+
+    def get_exam_attempt(self, exam_id, question_id):
+        """获取考题答题记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT * FROM exam_attempts
+            WHERE exam_id = ? AND question_id = ?
+        ''', (exam_id, question_id))
+
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_all_exam_attempts(self, exam_id=None):
+        """获取所有考题答题记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        if exam_id:
+            cursor.execute('''
+                SELECT * FROM exam_attempts WHERE exam_id = ? ORDER BY question_id
+            ''', (exam_id,))
+        else:
+            cursor.execute('''
+                SELECT * FROM exam_attempts ORDER BY last_modified DESC
+            ''')
+
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_exam_attempt_by_id(self, attempt_id):
+        """根据 ID 获取考题答题记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT * FROM exam_attempts WHERE id = ?
+        ''', (attempt_id,))
+
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def delete_exam_by_id(self, exam_id):
+        """删除指定试卷的所有记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            DELETE FROM exam_attempts WHERE exam_id = ?
+        ''', (exam_id,))
+
+        conn.commit()
+        conn.close()
+
+    def add_exam_submission(self, attempt_id, user_code, result):
+        """添加提交记录"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT INTO exam_submissions (attempt_id, user_code, result)
+            VALUES (?, ?, ?)
+        ''', (attempt_id, user_code, result))
+
+        conn.commit()
+
+        # 更新答题记录状态
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE exam_attempts SET status = 'completed' WHERE id = ?
+        ''', (attempt_id,))
         conn.commit()
         conn.close()

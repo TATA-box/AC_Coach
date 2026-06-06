@@ -16,9 +16,10 @@ from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
     QIcon, QImage, QKeySequence, QLinearGradient,
     QPainter, QPalette, QPixmap, QRadialGradient,
     QTransform)
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QGridLayout, QHBoxLayout,
-    QHeaderView, QMainWindow, QMenu, QMenuBar,
-    QPushButton, QSizePolicy, QSpacerItem, QSplitter,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QGridLayout,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QMainWindow, QMenu, QMenuBar, QPushButton,
+    QScrollArea, QSizePolicy, QSpacerItem, QSplitter,
     QStackedWidget, QStatusBar, QTabWidget, QTableWidget,
     QTableWidgetItem, QTextEdit, QTreeView, QVBoxLayout,
     QWidget)
@@ -287,6 +288,137 @@ class Ui_MainWindow(object):
         self.mainstackedWidget.addWidget(self.codingPage)
         self.reviewPage = QWidget()
         self.reviewPage.setObjectName(u"reviewPage")
+        self.verticalLayout_7 = QVBoxLayout(self.reviewPage)
+        self.verticalLayout_7.setObjectName(u"verticalLayout_7")
+        self.titlePage = QHBoxLayout()
+        self.titlePage.setObjectName(u"titlePage")
+        self.titleLabel = QLabel(self.reviewPage)
+        self.titleLabel.setObjectName(u"titleLabel")
+        self.titleLabel.setStyleSheet(u"font-size: 16px;\n"
+"font-weight: bold;\n"
+"color: #2c3e50;")
+
+        self.titlePage.addWidget(self.titleLabel)
+
+        self.horizontalSpacer = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.titlePage.addItem(self.horizontalSpacer)
+
+        self.refreshButton = QPushButton(self.reviewPage)
+        self.refreshButton.setObjectName(u"refreshButton")
+        self.refreshButton.setStyleSheet(u"background-color: #3498db;\n"
+"color: white;\n"
+"border: none;\n"
+"border-radius: 4px;\n"
+"padding: 6px 12px;")
+
+        self.titlePage.addWidget(self.refreshButton)
+
+        self.generatereviewButton = QPushButton(self.reviewPage)
+        self.generatereviewButton.setObjectName(u"generatereviewButton")
+        self.generatereviewButton.setStyleSheet(u"background-color: #3498db;\n"
+"color: white;\n"
+"border: none;\n"
+"border-radius: 4px;\n"
+"padding: 6px 12px;")
+
+        self.titlePage.addWidget(self.generatereviewButton)
+
+
+        self.verticalLayout_7.addLayout(self.titlePage)
+
+        self.filterPage = QHBoxLayout()
+        self.filterPage.setObjectName(u"filterPage")
+        self.filterLabel = QLabel(self.reviewPage)
+        self.filterLabel.setObjectName(u"filterLabel")
+
+        self.filterPage.addWidget(self.filterLabel)
+
+        self.filterCombo = QComboBox(self.reviewPage)
+        self.filterCombo.addItem("")
+        self.filterCombo.addItem("")
+        self.filterCombo.addItem("")
+        self.filterCombo.setObjectName(u"filterCombo")
+        self.filterCombo.setStyleSheet(u"QComboBox {\n"
+"    border: 1px solid #ddd;\n"
+"    border-radius: 4px;\n"
+"    padding: 4px 8px;\n"
+"    min-width: 100px;\n"
+"}")
+
+        self.filterPage.addWidget(self.filterCombo)
+
+        self.knowledgeLabel = QLabel(self.reviewPage)
+        self.knowledgeLabel.setObjectName(u"knowledgeLabel")
+
+        self.filterPage.addWidget(self.knowledgeLabel)
+
+        self.knowledgeCombo = QComboBox(self.reviewPage)
+        self.knowledgeCombo.setObjectName(u"knowledgeCombo")
+        self.knowledgeCombo.setStyleSheet(u"QComboBox {\n"
+"    border: 1px solid #ddd;\n"
+"    border-radius: 4px;\n"
+"    padding: 4px 8px;\n"
+"    min-width: 100px;\n"
+"}")
+
+        self.filterPage.addWidget(self.knowledgeCombo)
+
+        self.errorLabel = QLabel(self.reviewPage)
+        self.errorLabel.setObjectName(u"errorLabel")
+
+        self.filterPage.addWidget(self.errorLabel)
+
+        self.searchEdit = QLineEdit(self.reviewPage)
+        self.searchEdit.setObjectName(u"searchEdit")
+        self.searchEdit.setStyleSheet(u"QLineEdit {\n"
+"    border: 1px solid #ddd;\n"
+"    border-radius: 4px;\n"
+"    padding: 4px 8px;\n"
+"    min-width: 150px;\n"
+"}")
+
+        self.filterPage.addWidget(self.searchEdit)
+
+        self.horizontalSpacer_2 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.filterPage.addItem(self.horizontalSpacer_2)
+
+        self.showexamsButton = QPushButton(self.reviewPage)
+        self.showexamsButton.setObjectName(u"showexamsButton")
+        self.showexamsButton.setStyleSheet(u"background-color: #3498db;\n"
+"color: white;\n"
+"border: none;\n"
+"border-radius: 4px;\n"
+"padding: 6px 12px;")
+
+        self.filterPage.addWidget(self.showexamsButton)
+
+
+        self.verticalLayout_7.addLayout(self.filterPage)
+
+        self.scrollArea = QScrollArea(self.reviewPage)
+        self.scrollArea.setObjectName(u"scrollArea")
+        self.scrollArea.setStyleSheet(u"QScrollArea {\n"
+"    border: none;\n"
+"    background-color: transparent;\n"
+"}")
+        self.scrollArea.setWidgetResizable(True)
+        self.scrollContent = QWidget()
+        self.scrollContent.setObjectName(u"scrollContent")
+        self.scrollContent.setGeometry(QRect(0, 0, 720, 446))
+        self.verticalLayout_8 = QVBoxLayout(self.scrollContent)
+        self.verticalLayout_8.setObjectName(u"verticalLayout_8")
+        self.scrollArea.setWidget(self.scrollContent)
+
+        self.verticalLayout_7.addWidget(self.scrollArea)
+
+        self.statsLabel = QLabel(self.reviewPage)
+        self.statsLabel.setObjectName(u"statsLabel")
+        self.statsLabel.setStyleSheet(u"color: rgb(136, 136, 136);")
+
+        self.verticalLayout_7.addWidget(self.statsLabel)
+
         self.mainstackedWidget.addWidget(self.reviewPage)
 
         self.gridLayout.addWidget(self.mainstackedWidget, 0, 1, 1, 1)
@@ -294,7 +426,7 @@ class Ui_MainWindow(object):
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(MainWindow)
         self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 800, 21))
+        self.menubar.setGeometry(QRect(0, 0, 800, 22))
         self.menuFile = QMenu(self.menubar)
         self.menuFile.setObjectName(u"menuFile")
         self.menuEditor = QMenu(self.menubar)
@@ -342,7 +474,7 @@ class Ui_MainWindow(object):
 
         self.retranslateUi(MainWindow)
 
-        self.mainstackedWidget.setCurrentIndex(0)
+        self.mainstackedWidget.setCurrentIndex(1)
         self.editorWidget.setCurrentIndex(0)
         self.panelWidget.setCurrentIndex(0)
 
@@ -401,6 +533,18 @@ class Ui_MainWindow(object):
         ___qtablewidgetitem4.setText(QCoreApplication.translate("MainWindow", u"Message", None))
         self.panelWidget.setTabText(self.panelWidget.indexOf(self.problemsPage), QCoreApplication.translate("MainWindow", u"Problems", None))
         self.panelWidget.setTabText(self.panelWidget.indexOf(self.compilelogPage), QCoreApplication.translate("MainWindow", u"Build Log", None))
+        self.titleLabel.setText(QCoreApplication.translate("MainWindow", u"\u9519\u56e0\u5e93", None))
+        self.refreshButton.setText(QCoreApplication.translate("MainWindow", u"\u5237\u65b0", None))
+        self.generatereviewButton.setText(QCoreApplication.translate("MainWindow", u"\u751f\u6210\u590d\u4e60\u8d44\u6599", None))
+        self.filterLabel.setText(QCoreApplication.translate("MainWindow", u"\u663e\u793a\uff1a", None))
+        self.filterCombo.setItemText(0, QCoreApplication.translate("MainWindow", u"\u5168\u90e8", None))
+        self.filterCombo.setItemText(1, QCoreApplication.translate("MainWindow", u"\u672a\u638c\u63e1", None))
+        self.filterCombo.setItemText(2, QCoreApplication.translate("MainWindow", u"\u5df2\u638c\u63e1", None))
+
+        self.knowledgeLabel.setText(QCoreApplication.translate("MainWindow", u"\u77e5\u8bc6\u70b9\uff1a", None))
+        self.errorLabel.setText(QCoreApplication.translate("MainWindow", u"\u9519\u8bef\uff1a", None))
+        self.showexamsButton.setText(QCoreApplication.translate("MainWindow", u"\u67e5\u770b\u5df2\u751f\u6210\u7684\u8003\u9898", None))
+        self.statsLabel.setText(QCoreApplication.translate("MainWindow", u"\u51710\u6761\u9519\u56e0", None))
         self.menuFile.setTitle(QCoreApplication.translate("MainWindow", u"File", None))
         self.menuEditor.setTitle(QCoreApplication.translate("MainWindow", u"Edit", None))
         self.menuRun.setTitle(QCoreApplication.translate("MainWindow", u"Run", None))

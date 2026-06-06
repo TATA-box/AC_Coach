@@ -1,7 +1,9 @@
 from pathlib import Path
+import json
 
-from PySide6.QtCore import QTimer,QSettings
-from PySide6.QtWidgets import (QFileDialog,QFileSystemModel,QMainWindow,QMessageBox,QInputDialog,QLineEdit,)
+from PySide6.QtCore import QTimer,QSettings,Qt
+from PySide6.QtWidgets import (QFileDialog,QFileSystemModel,QMainWindow,QMessageBox,QInputDialog,QLineEdit,
+                                QWidget,QVBoxLayout,QDialog,)
 
 from ui.ui_form import Ui_MainWindow
 from app.editor_manager import EditorManager
@@ -9,7 +11,14 @@ from app.cpp_runner import CppRunner
 from app.panel_manager import PanelManager
 from app.problem_controller import ProblemController
 from app.coach_service import CoachController
+from app.review_manager import ReviewManager
+from app.exam_manager import ExamManager
+from app.exam_dialog import ExamListDialog
+from app.exam_history_dialog import ExamHistoryDialog
+from app.exam_answer_dialog import ExamAnswerDialog
 from database import Database
+
+
 
 
 class MainWindow(QMainWindow):
@@ -39,6 +48,9 @@ class MainWindow(QMainWindow):
             db=self.db,
         )
 
+        self.review_manager = ReviewManager(self.db, self)
+        self.exam_manager = ExamManager(self.db, self)
+
         self.settings=QSettings("AC_coach", "AC_coach")
         self.llm_api_key=self.settings.value("deepseek/api_key","")
 
@@ -46,6 +58,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0,self.hide_ai_panel)
 
         self.connect_signals()
+
+        self.setup_review_page()
 
 
     def setup_filetree(self):
@@ -84,6 +98,13 @@ class MainWindow(QMainWindow):
         self.ui.act_copy.triggered.connect(self.editor_manager.copy)
         self.ui.act_paste.triggered.connect(self.editor_manager.paste)
 
+        self.ui.refreshButton.clicked.connect(self.refresh_mistake_list)
+        self.ui.generatereviewButton.clicked.connect(self.generate_review_material)
+        self.ui.filterCombo.currentTextChanged.connect(self.refresh_mistake_list)
+        self.ui.knowledgeCombo.currentTextChanged.connect(self.refresh_mistake_list)
+        self.ui.searchEdit.textChanged.connect(self.refresh_mistake_list)
+        self.ui.showexamsButton.clicked.connect(self.show_exam_history)
+
     def show_codingmode(self):
         self.ui.mainstackedWidget.setCurrentWidget(self.ui.codingPage)
         self.ui.codingmodeButton.setChecked(True)
@@ -94,6 +115,7 @@ class MainWindow(QMainWindow):
         self.ui.codingmodeButton.setChecked(False)
         self.ui.reviewmodeButton.setChecked(True)
         self.statusBar().showMessage("Review Mode")
+        self.refresh_mistake_list()
 
     def show_about(self):
         QMessageBox.information(self,"About AC_coach","pat pat")
@@ -201,3 +223,144 @@ class MainWindow(QMainWindow):
             return False
         return self.config_api_key()
 
+    def setup_review_page(self):
+        if self.ui.scrollContent.layout() is None:
+            layout = QVBoxLayout(self.ui.scrollContent)
+            layout.setSpacing(10)
+            layout.setContentsMargins(5, 5, 5, 5)
+            layout.addStretch()
+
+        self.review_manager.update_knowledge_combo(self.ui.knowledgeCombo)
+
+        self.review_manager.review_generated.connect(self.on_review_generated)
+        self.review_manager.review_error.connect(self.on_review_error)
+
+        self.exam_manager.exam_generated.connect(self.on_exam_generated)
+        self.exam_manager.exam_error.connect(self.on_exam_error)
+
+    def refresh_mistake_list(self):
+        self.review_manager.refresh_mistake_list(
+            self.ui.scrollContent, self.ui.statsLabel, self.ui.filterCombo,
+            self.ui.knowledgeCombo, self.ui.searchEdit, self.db
+        )
+
+    def generate_review_material(self):
+        self.review_manager.generate_review_material(self, self.ensure_api_key)
+
+    def on_review_generated(self, review):
+        self.ui.statsLabel.setText("复习资料生成完成")
+        self.review_manager.show_review_material_dialog(
+            self, review, lambda dialog: self.on_generate_exam_from_dialog(dialog)
+        )
+
+    def on_review_error(self, error_msg):
+        self.ui.statsLabel.setText("复习资料生成失败")
+        QMessageBox.warning(self, "生成失败", f"生成复习资料时出错：{error_msg}")
+
+    def on_generate_exam_from_dialog(self, review_dialog):
+        review_dialog.accept()
+        self.generate_exam()
+
+    def generate_exam(self):
+        mistakes = self.db.get_all_mistakes(include_mastered=True)
+
+        if not mistakes:
+            QMessageBox.information(self, "生成考题", "暂无错因记录，请先进行一些调试并生成错因卡片。")
+            return
+
+        if not self.ensure_api_key():
+            return
+
+        error_cards = []
+        for m in mistakes:
+            card = {
+                "title": m.get("error_card_title", m.get("error_type", "")),
+                "error_type": m.get("error_type", ""),
+                "root_cause": m.get("root_cause", ""),
+                "knowledge_points": json.loads(m.get("knowledge_points", "[]")) if m.get("knowledge_points") else [],
+                "wrong_code_pattern": m.get("wrong_pattern", ""),
+                "priority": m.get("review_priority", "medium"),
+            }
+            error_cards.append(card)
+
+        self.ui.statsLabel.setText("正在生成考题，请稍候...")
+        self.exam_manager.generate_exam(self, error_cards, self.ensure_api_key)
+
+    def on_exam_generated(self, paper, exam_id):
+        self.ui.statsLabel.setText("考题生成完成")
+
+        questions = paper.get("questions", [])
+        for q in questions:
+            q["status"] = "in_progress"  # 新生成的题目状态为进行中
+
+        self.exam_manager.save_questions_to_db(exam_id, questions)
+
+        dialog = ExamListDialog(
+            title=paper.get("paper_plan", {}).get("paper_title", exam_id),
+            questions=paper.get("questions", []),
+            parent=self
+        )
+
+        if dialog.exec() == QDialog.Accepted:
+            selected = dialog.get_selected_question()
+            if selected:
+                self.show_answer_interface(selected, exam_id)
+
+    def on_exam_error(self, error_msg):
+        self.ui.statsLabel.setText("考题生成失败")
+        QMessageBox.warning(self, "生成失败", f"生成考题时出错：{error_msg}")
+
+    def show_answer_interface(self, question, exam_id):
+        """显示答题界面"""
+        dialog = ExamAnswerDialog(question, exam_id, self.db, self)
+        dialog.exec()
+
+    def show_exam_history(self):
+        """显示历史考题对话框"""
+        # 从数据库获取所有历史记录
+        attempts = self.db.get_all_exam_attempts()
+
+        if not attempts:
+            QMessageBox.information(self, "历史考题", "暂无历史记录")
+            return
+
+        # 按 exam_id 分组，让用户先选择哪次考试
+        from collections import defaultdict
+        grouped = defaultdict(list)
+        for a in attempts:
+            grouped[a.get("exam_id")].append(a)
+
+        # 构建考试列表
+        exams = []
+        for exam_id, questions in grouped.items():
+            # 统计完成情况
+            total = len(questions)
+            completed = sum(1 for q in questions if q.get("status") == "completed")
+
+            exams.append({
+                "exam_id": exam_id,
+                "title": f"试卷 {exam_id}",
+                "questions": questions,
+                "progress": f"{completed}/{total}"
+            })
+
+        # 显示选择考试的对话框
+        dialog = ExamHistoryDialog(exams, self.db, self)
+
+        if dialog.exec() == QDialog.Accepted:
+            selected_exam = dialog.get_selected_exam()
+            if selected_exam:
+                questions = self.exam_manager.get_exam_questions_from_db(selected_exam["exam_id"])
+                # 使用同一个 ExamListDialog
+                dialog2 = ExamListDialog(
+                    title=selected_exam["title"],
+                    questions=questions,
+                    db=self.db,
+                    exam_id=selected_exam["exam_id"],
+                    parent=self
+                )
+
+                if dialog2.exec() == QDialog.Accepted:
+                    selected = dialog2.get_selected_question()
+                    if selected:
+                        self.show_answer_interface(selected, selected_exam["exam_id"])
