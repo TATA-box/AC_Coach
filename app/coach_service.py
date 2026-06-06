@@ -453,60 +453,68 @@ class CoachController(QObject):
             raw_response=_json_dump(diagnosis),
             status="finished",
         )
-        try:
-            # 获取当前的上下文信息，用于构建 archive_item
-            problem = self.db.get_problem(self.problem_id) if self.problem_id else None
-            code_record = self.db.get_latest_code_record_by_problem(self.problem_id) if self.problem_id else None
-            if problem and code_record and self.diagnosis_id:
-                archive_item = {
-                    "problem_text": problem.get("content", ""),
-                    "problem_analysis": {
-                        "summary": problem.get("summary", ""),
-                        "input_format": problem.get("input_format", ""),
-                        "output_format": problem.get("output_format", ""),
-                        "knowledge_points": _json_load(problem.get("knowledge_points"), []),
-                        "constraints": _json_load(problem.get("constraints"), []),
-                        "common_pitfalls": _json_load(problem.get("common_pitfalls"), []),
-                        "suggested_approach": _json_load(problem.get("suggested_approach"), []),
-                        "difficulty": problem.get("difficulty", ""),
-                    },
-                    "code": code_record.get("code_content", ""),
-                    "program_input": code_record.get("program_input", ""),
-                    "program_output": code_record.get("program_output", ""),
-                    "expected_output": code_record.get("expected_output", ""),
-                    "error_message": code_record.get("error_message", ""),
-                    "oj_result": code_record.get("oj_result", ""),
-                    "extra_info": code_record.get("extra_info", ""),
-                    "diagnosis": diagnosis,  # 诊断结果
-                }
 
-                error_card = summarize_error_record(archive_item)
-                self.db.add_mistake(
-                    problem_id=self.problem_id,
-                    diagnosis_id=self.diagnosis_id,
-                    error_type=error_card.get("error_type", diagnosis.get("error_type", "")),
-                    error_description=error_card.get("title", diagnosis.get("error_summary", "")),
-                    wrong_code=extract_wrong_code(code_record.get("code_content", ""), diagnosis),  # 可选：提取错误代码片段
-                    knowledge_points=_json_dump(error_card.get("knowledge_points", [])),
-                    error_card_title=error_card.get("title", ""),
-                    root_cause=error_card.get("root_cause", ""),
-                    wrong_pattern=error_card.get("wrong_code_pattern", ""),
-                    review_question=error_card.get("review_question", ""),
-                    review_hint=error_card.get("review_hint", ""),
-                    avoid_next_time=error_card.get("avoid_next_time", ""),
-                    tags=_json_dump(error_card.get("tags", [])),
-                    review_priority=error_card.get("review_priority", "medium"),
-                )
+        self.generate_mistake_card_async(diagnosis)
 
+    def generate_mistake_card_async(self, diagnosis):
+        def task():
+            try:
+                # 获取当前的上下文信息，用于构建 archive_item
+                problem = self.db.get_problem(self.problem_id) if self.problem_id else None
+                code_record = self.db.get_latest_code_record_by_problem(self.problem_id) if self.problem_id else None
+                if problem and code_record and self.diagnosis_id:
+                    archive_item = {
+                        "problem_text": problem.get("content", ""),
+                        "problem_analysis": {
+                            "summary": problem.get("summary", ""),
+                            "input_format": problem.get("input_format", ""),
+                            "output_format": problem.get("output_format", ""),
+                            "knowledge_points": _json_load(problem.get("knowledge_points"), []),
+                            "constraints": _json_load(problem.get("constraints"), []),
+                            "common_pitfalls": _json_load(problem.get("common_pitfalls"), []),
+                            "suggested_approach": _json_load(problem.get("suggested_approach"), []),
+                            "difficulty": problem.get("difficulty", ""),
+                        },
+                        "code": code_record.get("code_content", ""),
+                        "program_input": code_record.get("program_input", ""),
+                        "program_output": code_record.get("program_output", ""),
+                        "expected_output": code_record.get("expected_output", ""),
+                        "error_message": code_record.get("error_message", ""),
+                        "oj_result": code_record.get("oj_result", ""),
+                        "extra_info": code_record.get("extra_info", ""),
+                        "diagnosis": diagnosis,  # 诊断结果
+                    }
+
+                    error_card = summarize_error_record(archive_item)
+                    self.db.add_mistake(
+                        problem_id=self.problem_id,
+                        diagnosis_id=self.diagnosis_id,
+                        error_type=error_card.get("error_type", diagnosis.get("error_type", "")),
+                        error_description=error_card.get("title", diagnosis.get("error_summary", "")),
+                        wrong_code=extract_wrong_code(code_record.get("code_content", ""), diagnosis),  # 可选：提取错误代码片段
+                        knowledge_points=_json_dump(error_card.get("knowledge_points", [])),
+                        error_card_title=error_card.get("title", ""),
+                        root_cause=error_card.get("root_cause", ""),
+                        wrong_pattern=error_card.get("wrong_code_pattern", ""),
+                        review_question=error_card.get("review_question", ""),
+                        review_hint=error_card.get("review_hint", ""),
+                        avoid_next_time=error_card.get("avoid_next_time", ""),
+                        tags=_json_dump(error_card.get("tags", [])),
+                        review_priority=error_card.get("review_priority", "medium"),
+                    )
+
+                    return "success"
+            except Exception as e:
+                return str(e)
+
+        def on_finished(result):
+            if result == "success":
                 self.panel.set_status("调试结束，诊断结果和错因卡片已保存。")
             else:
-                self.panel.set_status("调试结束，诊断结果已保存。")
+                print(f"错因卡片生成失败：{result}")
+                self.panel.set_status("调试结束，诊断结果已保存（错因卡片生成失败）。")
 
-
-        except Exception as e:
-            # 错因卡片生成失败不影响主流程
-            print(f"生成错因卡片失败：{e}")
-            self.panel.set_status("调试结束，诊断结果已保存（错因卡片生成失败）。")
+        self.run_in_thread(task, on_finished)
 
 
     def run_in_thread(self, func, on_success):
