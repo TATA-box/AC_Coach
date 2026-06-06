@@ -135,7 +135,7 @@ class ReviewManager(QObject):
         btn_layout = QHBoxLayout()
 
         generate_exam_btn = QPushButton("生成考题")
-        generate_exam_btn.clicked.connect(lambda: self.on_generate_exam_callback(dialog))
+        generate_exam_btn.clicked.connect(lambda: on_generate_exam_callback(dialog))
 
         close_btn = QPushButton("关闭")
         close_btn.clicked.connect(dialog.accept)
