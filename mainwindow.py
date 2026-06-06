@@ -350,7 +350,7 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             selected_exam = dialog.get_selected_exam()
             if selected_exam:
-                questions = self.exam_manager.get_exam_questions_from_db(selected_exam["exam_id"])
+                questions = self.exam_manager.get_questions_from_db(selected_exam["exam_id"])
                 # 使用同一个 ExamListDialog
                 dialog2 = ExamListDialog(
                     title=selected_exam["title"],

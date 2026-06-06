@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
     QPushButton, QSplitter, QMessageBox, QWidget, QApplication
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from pyqcodeeditor.QCodeEditor import QCodeEditor
 from pyqcodeeditor.highlighters import QCXXHighlighter
 from pyqcodeeditor.completers import QCXXCompleter
@@ -13,7 +14,6 @@ import re
 
 class ExamAnswerDialog(QDialog):
     """答题界面"""
-
     def __init__(self, question, exam_id, db, parent=None):
         super().__init__(parent)
         self.question = question
@@ -24,7 +24,48 @@ class ExamAnswerDialog(QDialog):
         self.setup_ui()
         self.load_saved_code()
 
+    def is_dark_mode(self):
+        #判断是否为深色模式
+        style_hints = QGuiApplication.styleHints()
+        return style_hints.colorScheme() == Qt.ColorScheme.Dark
+
     def setup_ui(self):
+        if self.is_dark_mode():
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #2d2d2d;
+                    color: #a0a0a0;
+                }
+                QLabel {
+                    color: #a0a0a0;
+                }
+                QTextEdit {
+                    background-color: #3c3c3c;
+                    color: #a0a0a0;
+                    border: 1px solid #555;
+                }
+                QPlainTextEdit {
+                    background-color: #3c3c3c;
+                    color: #a0a0a0;
+                    border: 1px solid #555;
+                }
+                QPushButton {
+                    background-color: #555;
+                    color: #a0a0a0;
+                    border: none;
+                    padding: 6px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #666;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QTextEdit, QPlainTextEdit {
+                border: 1px solid #ddd;
+                }
+            """)
         self.setWindowTitle(f"答题 - {self.question.get('title', '未命名题目')}")
         self.resize(900, 700)
 
@@ -49,6 +90,7 @@ class ExamAnswerDialog(QDialog):
         self.code_editor = QCodeEditor()
         self.code_editor.setHighlighter(QCXXHighlighter())
         self.code_editor.setCompleter(QCXXCompleter())
+
 
         # 设置代码模板
         code_template = self.question.get("user_view", {}).get("code_template", "")
@@ -110,28 +152,54 @@ class ExamAnswerDialog(QDialog):
             </div>
             """
 
+        # 根据深色模式设置 CSS
+        if self.is_dark_mode():
+            css = """
+                body {
+                    background-color: #2d2d2d;
+                    color: #d4d4d4;
+                    font-family: Arial, sans-serif;
+                    margin: 15px;
+                }
+                h1 { color: #ffffff; }
+                .type { color: #66d9ef; font-size: 14px; margin-bottom: 10px; }
+                .statement { margin-top: 15px; line-height: 1.5; }
+                .instruction { margin-top: 15px; padding: 10px; background-color: #3c3c3c; border-radius: 5px; }
+                .code-block { margin-top: 15px; }
+                pre {
+                    background-color: #3c3c3c;
+                    color: #d4d4d4;
+                    padding: 10px;
+                    border-radius: 5px;
+                    font-family: 'Courier New', monospace;
+                    font-size: 13px;
+                    overflow-x: auto;
+                }
+            """
+        else:
+            css = """
+                body {
+                    font-family: Arial, sans-serif;
+                    margin: 15px;
+                }
+                h1 { color: #2c3e50; }
+                .type { color: #3498db; font-size: 14px; margin-bottom: 10px; }
+                .statement { margin-top: 15px; line-height: 1.5; }
+                .instruction { margin-top: 15px; padding: 10px; background-color: #f0f8ff; border-radius: 5px; }
+                .code-block { margin-top: 15px; }
+                pre {
+                    background-color: #f5f5f5;
+                    padding: 10px;
+                    border-radius: 5px;
+                    font-family: 'Courier New', monospace;
+                    font-size: 13px;
+                    overflow-x: auto;
+                }
+            """
+
         html_content = f"""
         <html>
-        <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 15px; }}
-            h1 {{ color: #2c3e50; }}
-            .type {{ color: #3498db; font-size: 14px; margin-bottom: 10px; }}
-            .statement {{ margin-top: 15px; line-height: 1.5; }}
-            .instruction {{ margin-top: 15px; padding: 10px; background-color: #f0f8ff; border-radius: 5px; }}
-            .code-block {{ margin-top: 15px; }}
-            pre {{
-                background-color: #f5f5f5;
-                padding: 10px;
-                border-radius: 5px;
-                font-family: 'Courier New', monospace;
-                font-size: 13px;
-                overflow-x: auto;
-                white-space: pre-wrap;
-                word-wrap: break-word;
-            }}
-        </style>
-        </head>
+        <head><style>{css}</style></head>
         <body>
         <h1>{title_escaped}</h1>
         <div class="type">题型：{type_name}</div>
